@@ -20,7 +20,6 @@ from anyio.streams.text import TextReceiveStream, TextSendStream
 
 from ..._errors import CLIConnectionError, CLINotFoundError, ProcessError
 from ..._errors import CLIJSONDecodeError as SDKJSONDecodeError
-from ..._version import __version__
 from ...types import ClaudeAgentOptions, SystemPromptFile, SystemPromptPreset
 from .._task_compat import TaskHandle, spawn_detached
 from . import Transport
@@ -80,12 +79,7 @@ class SubprocessCLITransport(Transport):
 
     def _find_cli(self) -> str:
         """Find Claude Code CLI binary."""
-        # First, check for bundled CLI
-        bundled_cli = self._find_bundled_cli()
-        if bundled_cli:
-            return bundled_cli
-
-        # Fall back to system-wide search
+        # Prefer system-installed CLI (has user's hooks, plugins, settings)
         if cli := shutil.which("claude"):
             return cli
 
