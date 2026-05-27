@@ -76,6 +76,7 @@ from .consensus import (
     VoteRecord,
 )
 from .cost_tracker import BudgetExceededEvent, BudgetPolicy, CostTracker
+from .deep_agent_client import DeepAgentClient, PipelineStatus
 from .hooks import HookRegistry
 from .litellm_config import LiteLLMConfig
 from .message_bus import Message as TeamMessage
@@ -100,7 +101,6 @@ from .rate_limiter import (
     global_rate_limiter,
 )
 from .runner import AutonomousRunner, RunResult
-from .deep_agent_client import DeepAgentClient, PipelineStatus
 from .session_stores import FileSessionStore, PostgresSessionStore, RedisSessionStore
 from .streaming import StreamingTransportMixin
 from .team_manager import AgentState, TeamManager

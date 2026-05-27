@@ -1,4 +1,5 @@
 """SpawnAgent tool — allows the model to spawn sub-runners during execution."""
+
 from __future__ import annotations
 
 import logging
@@ -69,7 +70,12 @@ async def execute_spawn_agent(
     if parent_checkpoint_dir:
         checkpoint_sub = f"{parent_checkpoint_dir}/sub"
 
-    logger.info("Spawning sub-agent: model=%s, max_turns=%d, task=%.100s", model, max_turns, task)
+    logger.info(
+        "Spawning sub-agent: model=%s, max_turns=%d, task=%.100s",
+        model,
+        max_turns,
+        task,
+    )
 
     runner = AutonomousRunner(
         base_url=parent_base_url,

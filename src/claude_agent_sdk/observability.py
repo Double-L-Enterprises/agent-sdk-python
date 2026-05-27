@@ -14,14 +14,13 @@ Created: 2026-05-27 CST
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -45,9 +44,11 @@ _STATE_LABELS = {
 
 # ─── Counter / Gauge / Histogram storage ──────────────────────────────────────
 
+
 @dataclass
 class _Counter:
     """Simple monotonically increasing counter."""
+
     name: str
     help_text: str
     labels: dict[str, float] = field(default_factory=dict)  # label_str → value
@@ -65,6 +66,7 @@ class _Counter:
 @dataclass
 class _Gauge:
     """Current-value gauge."""
+
     name: str
     help_text: str
     labels: dict[str, float] = field(default_factory=dict)  # label_str → value
@@ -89,17 +91,30 @@ class _HistogramBucket:
 @dataclass
 class _Histogram:
     """Duration histogram."""
+
     name: str
     help_text: str
     bucket_bounds: list[float] = field(
-        default_factory=lambda: [0.1, 0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0, 600.0, float("inf")]
+        default_factory=lambda: [
+            0.1,
+            0.5,
+            1.0,
+            5.0,
+            10.0,
+            30.0,
+            60.0,
+            120.0,
+            300.0,
+            600.0,
+            float("inf"),
+        ]
     )
     _data: dict[str, _HistogramBucket] = field(default_factory=dict)
 
     def observe(self, label_str: str, value: float) -> None:
         if label_str not in self._data:
             self._data[label_str] = _HistogramBucket(
-                buckets={b: 0 for b in self.bucket_bounds}
+                buckets=dict.fromkeys(self.bucket_bounds, 0)
             )
         d = self._data[label_str]
         d.count += 1
@@ -109,7 +124,10 @@ class _Histogram:
                 d.buckets[bound] += 1
 
     def render(self) -> str:
-        lines = [f"# HELP {self.name} {self.help_text}", f"# TYPE {self.name} histogram"]
+        lines = [
+            f"# HELP {self.name} {self.help_text}",
+            f"# TYPE {self.name} histogram",
+        ]
         for lbl, d in sorted(self._data.items()):
             for bound, cnt in sorted(d.buckets.items(), key=lambda x: x[0]):
                 le = "+Inf" if bound == float("inf") else str(bound)
@@ -125,6 +143,7 @@ def _fmt_labels(**kwargs: str) -> str:
 
 
 # ─── TeamMetrics ───────────────────────────────────────────────────────────────
+
 
 class TeamMetrics:
     """Collect and expose Prometheus-compatible metrics for agent teams.
@@ -281,17 +300,19 @@ class TeamMetrics:
 
 # ─── RunHistory ────────────────────────────────────────────────────────────────
 
+
 @dataclass
 class RunRecord:
     """Stored data for a single completed team run."""
+
     run_id: str
     team_id: str
     timestamp: str
     duration_seconds: float
-    agents: list[dict[str, Any]]           # [{name, model, status, turns, cost}]
-    messages: list[dict[str, Any]]         # inter-agent messages from the bus
-    costs: dict[str, float]                # agent_name → cost in USD
-    result: str                            # "success" | "timeout" | "error" | summary text
+    agents: list[dict[str, Any]]  # [{name, model, status, turns, cost}]
+    messages: list[dict[str, Any]]  # inter-agent messages from the bus
+    costs: dict[str, float]  # agent_name → cost in USD
+    result: str  # "success" | "timeout" | "error" | summary text
     agent_conversations: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
     # ^ agent_name → list of {role, content} messages
 
@@ -408,7 +429,9 @@ class RunHistory:
             search_dirs = [d for d in self._base_dir.iterdir() if d.is_dir()]
 
         for team_dir in search_dirs:
-            for run_file in sorted(team_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+            for run_file in sorted(
+                team_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True
+            ):
                 try:
                     with open(run_file, encoding="utf-8") as f:
                         data = json.load(f)
@@ -418,7 +441,9 @@ class RunHistory:
                         if ts_epoch < since:
                             continue
                     # Return summary (no agent_conversations)
-                    summary = {k: v for k, v in data.items() if k != "agent_conversations"}
+                    summary = {
+                        k: v for k, v in data.items() if k != "agent_conversations"
+                    }
                     results.append(summary)
                     if len(results) >= limit:
                         break
@@ -481,6 +506,7 @@ class RunHistory:
         """Convert ISO 8601 string to Unix timestamp. Returns 0.0 on parse error."""
         try:
             import datetime
+
             dt = datetime.datetime.fromisoformat(iso)
             return dt.timestamp()
         except Exception:

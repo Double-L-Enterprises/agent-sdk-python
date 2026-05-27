@@ -1,4 +1,5 @@
 """Multi-agent orchestration — run multiple AutonomousRunners in parallel or sequence."""
+
 from __future__ import annotations
 
 import asyncio
@@ -14,6 +15,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class AgentConfig:
     """Configuration for a single agent in the orchestrator."""
+
     name: str
     task: str
     model: str = "qwen/qwen3-max"
@@ -27,6 +29,7 @@ class AgentConfig:
 @dataclass
 class MultiAgentResult:
     """Aggregated result from all agents."""
+
     results: dict[str, RunResult]  # name -> result
     total_turns: int
     total_tool_calls: int
@@ -39,7 +42,9 @@ class MultiAgentResult:
         lines = []
         for name, r in self.results.items():
             status = "PASS" if r.success else f"FAIL ({r.stopped_reason})"
-            lines.append(f"  {name}: {status} — {r.turns} turns, {r.total_tool_calls} tools, {r.elapsed_seconds:.1f}s")
+            lines.append(
+                f"  {name}: {status} — {r.turns} turns, {r.total_tool_calls} tools, {r.elapsed_seconds:.1f}s"
+            )
         return "\n".join(lines)
 
 
@@ -89,8 +94,12 @@ class MultiAgentOrchestrator:
             depends_on: List of agent names this agent depends on (waits for completion).
         """
         self._agents[name] = AgentConfig(
-            name=name, task=task, model=model, cwd=cwd,
-            max_turns=max_turns, escalation_model=escalation_model,
+            name=name,
+            task=task,
+            model=model,
+            cwd=cwd,
+            max_turns=max_turns,
+            escalation_model=escalation_model,
             system_prompt=system_prompt,
             depends_on=depends_on or [],
         )
@@ -115,7 +124,8 @@ class MultiAgentOrchestrator:
         while remaining:
             # Find agents whose dependencies are all completed
             ready = {
-                name: cfg for name, cfg in remaining.items()
+                name: cfg
+                for name, cfg in remaining.items()
                 if all(dep in completed for dep in cfg.depends_on)
             }
 
@@ -127,7 +137,8 @@ class MultiAgentOrchestrator:
                         final_text=f"Deadlock: dependencies {remaining[name].depends_on} never completed",
                         turn_count=0,
                         total_tool_calls=0,
-                        elapsed_seconds=0, success=False,
+                        elapsed_seconds=0,
+                        success=False,
                         stopped_reason="error",
                         model_history=[],
                     )
@@ -135,14 +146,19 @@ class MultiAgentOrchestrator:
 
             # Run ready agents in parallel
             tasks = {name: self._run_agent(cfg) for name, cfg in ready.items()}
-            agent_results = await asyncio.gather(*tasks.values(), return_exceptions=True)
+            agent_results = await asyncio.gather(
+                *tasks.values(), return_exceptions=True
+            )
 
             for name, result in zip(tasks.keys(), agent_results):
                 if isinstance(result, Exception):
                     results[name] = RunResult(
                         messages=[],
-                        final_text=str(result), turn_count=0,
-                        total_tool_calls=0, elapsed_seconds=0, success=False,
+                        final_text=str(result),
+                        turn_count=0,
+                        total_tool_calls=0,
+                        elapsed_seconds=0,
+                        success=False,
                         stopped_reason="error",
                         model_history=[],
                     )
@@ -181,15 +197,25 @@ class MultiAgentOrchestrator:
             if results:
                 prev_summaries = []
                 for prev_name, prev_result in results.items():
-                    prev_summaries.append(f"Agent '{prev_name}' completed: {prev_result.final_text[:200]}")
-                context = "\n\nPrevious agents completed:\n" + "\n".join(prev_summaries) + "\n\n"
+                    prev_summaries.append(
+                        f"Agent '{prev_name}' completed: {prev_result.final_text[:200]}"
+                    )
+                context = (
+                    "\n\nPrevious agents completed:\n"
+                    + "\n".join(prev_summaries)
+                    + "\n\n"
+                )
 
             task_with_context = context + cfg.task if context else cfg.task
             modified_cfg = AgentConfig(
-                name=cfg.name, task=task_with_context, model=cfg.model,
-                cwd=cfg.cwd, max_turns=cfg.max_turns,
+                name=cfg.name,
+                task=task_with_context,
+                model=cfg.model,
+                cwd=cfg.cwd,
+                max_turns=cfg.max_turns,
                 escalation_model=cfg.escalation_model,
-                system_prompt=cfg.system_prompt, depends_on=cfg.depends_on,
+                system_prompt=cfg.system_prompt,
+                depends_on=cfg.depends_on,
             )
             results[name] = await self._run_agent(modified_cfg)
 
@@ -227,7 +253,9 @@ class MultiAgentOrchestrator:
             checkpoint_dir=checkpoint_sub,
         )
 
-        logger.info("Starting agent '%s' (model=%s, cwd=%s)", cfg.name, cfg.model, cfg.cwd)
+        logger.info(
+            "Starting agent '%s' (model=%s, cwd=%s)", cfg.name, cfg.model, cfg.cwd
+        )
         result = await runner.run(
             task=cfg.task,
             cwd=cfg.cwd,
@@ -235,6 +263,9 @@ class MultiAgentOrchestrator:
         )
         logger.info(
             "Agent '%s' finished: success=%s, turns=%d, tools=%d",
-            cfg.name, result.success, result.turns, result.total_tool_calls,
+            cfg.name,
+            result.success,
+            result.turns,
+            result.total_tool_calls,
         )
         return result

@@ -24,7 +24,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .agent_memory import AgentMemory
 from .message_bus import Message, MessageBus
+from .observability import global_metrics
 from .runner import AutonomousRunner, RunResult
 from .tools import default_tools, dispatch_tool
 from .tools.team_message import (
@@ -32,8 +34,8 @@ from .tools.team_message import (
     SEND_TEAM_MESSAGE_TOOL,
     read_team_messages,
     send_team_message,
-    team_tools,
 )
+from .webhooks import WebhookEvent, WebhookManager
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +75,8 @@ class TeamManager:
         base_url: str = "http://127.0.0.1:8016",
         api_key: str = "sk-bbc8dc18c88aed96187cb3dea585b900e79601fd9f0fcf6cc93170b0e89fcca1",
         bus_dir: str | None = None,
+        memory_dir: str | None = None,
+        webhook_manager: WebhookManager | None = None,
     ) -> None:
         """Initialize the TeamManager.
 
@@ -83,6 +87,11 @@ class TeamManager:
             api_key: API key for the LiteLLM endpoint.
             bus_dir: Override for the MessageBus directory. Defaults to
                      /tmp/agent-teams/{team_id}/messages
+            memory_dir: If set, enables per-agent memory persistence.
+                        An AgentMemory instance is created per agent for
+                        state save/load across restarts.
+            webhook_manager: If set, fires lifecycle webhook events at key
+                             team/agent milestones (fire-and-forget).
         """
         self.team_id = team_id
         self.output_dir = Path(os.path.expanduser(output_dir))
@@ -93,6 +102,14 @@ class TeamManager:
 
         self.bus = MessageBus(team_id=team_id, bus_dir=bus_dir)
         self._agents: dict[str, AgentState] = {}
+
+        # Optional integrations
+        self._memory_dir = memory_dir
+        self._memory: AgentMemory | None = (
+            AgentMemory(memory_dir) if memory_dir else None
+        )
+        self._webhook: WebhookManager | None = webhook_manager
+        self._agent_memories: dict[str, AgentMemory] = {}
 
     # ── Agent registration ─────────────────────────────────────────────────────
 
@@ -120,7 +137,9 @@ class TeamManager:
             escalation_model: Optional fallback model on stall.
         """
         if name in self._agents:
-            raise ValueError(f"Agent '{name}' already registered on team '{self.team_id}'")
+            raise ValueError(
+                f"Agent '{name}' already registered on team '{self.team_id}'"
+            )
 
         state = AgentState(
             name=name,
@@ -132,7 +151,15 @@ class TeamManager:
 
         # Ensure the agent has an inbox in the bus
         self.bus._agent_dir(name)
-        logger.info("Registered agent '%s' (model=%s) on team '%s'", name, model, self.team_id)
+
+        # Create per-agent memory instance if memory_dir is configured
+        if self._memory is not None:
+            self._agent_memories[name] = self._memory
+            logger.debug("AgentMemory wired for agent '%s'", name)
+
+        logger.info(
+            "Registered agent '%s' (model=%s) on team '%s'", name, model, self.team_id
+        )
 
     # ── Start ─────────────────────────────────────────────────────────────────
 
@@ -140,13 +167,45 @@ class TeamManager:
         """Start all registered agents as concurrent asyncio Tasks.
 
         Each agent runs its initial task (or waits for a message if task is empty).
+        If memory_dir is configured, loads persisted state for each agent before start.
         Returns immediately after spawning all tasks.
         """
+        # Record team start in observability
+        global_metrics.record_team_start(self.team_id)
+
+        # Fire team_started webhook
+        await self._fire_webhook(WebhookEvent.TEAM_STARTED.value, {
+            "team_id": self.team_id,
+            "agent_count": len(self._agents),
+        })
+
         for name, state in self._agents.items():
             if state.asyncio_task is not None:
                 logger.warning("Agent '%s' already started, skipping", name)
                 continue
+
+            # Load persisted memory state if available (resume support)
+            if name in self._agent_memories:
+                mem = self._agent_memories[name]
+                saved = mem.load_state(name)
+                if saved:
+                    logger.info(
+                        "Restored %d messages for agent '%s' from memory",
+                        saved.get("message_count", 0),
+                        name,
+                    )
+
             state.status = "running"
+            global_metrics.set_agent_state(name, "running")
+
+            # Fire agent_started webhook
+            await self._fire_webhook(WebhookEvent.AGENT_JOINED.value, {
+                "team_id": self.team_id,
+                "agent_name": name,
+                "model": state.model,
+                "role": state.role,
+            })
+
             state.asyncio_task = asyncio.create_task(
                 self._run_agent_task(state),
                 name=f"team-{self.team_id}-agent-{name}",
@@ -180,6 +239,16 @@ class TeamManager:
         )
         self.bus.send(msg)
         logger.info("Sent message from '%s' to '%s'", from_name, agent_name)
+
+        # Record message in observability
+        global_metrics.record_message(from_name, agent_name)
+
+        # Fire message_sent webhook (optional — can be noisy)
+        await self._fire_webhook(WebhookEvent.MESSAGE_SENT.value, {
+            "team_id": self.team_id,
+            "from": from_name,
+            "to": agent_name,
+        })
 
     async def broadcast(self, message: str, from_name: str = "orchestrator") -> None:
         """Send a message to all registered agents.
@@ -226,6 +295,25 @@ class TeamManager:
         except asyncio.TimeoutError:
             logger.warning("wait_for_completion timed out after %ds", timeout)
 
+        # Record team completion in observability
+        global_metrics.record_team_complete(self.team_id)
+
+        # Compute aggregate stats for webhook payload
+        total_turns = sum(s.turns for s in self._agents.values())
+        agent_count = len(self._agents)
+
+        # Save final memory state for all agents
+        for name, state in self._agents.items():
+            if state.result:
+                self._save_agent_memory(state, state.result)
+
+        # Fire team_completed webhook
+        await self._fire_webhook(WebhookEvent.TEAM_COMPLETED.value, {
+            "team_id": self.team_id,
+            "agent_count": agent_count,
+            "total_turns": total_turns,
+        })
+
         return {
             name: (state.result if state.result else state.status)
             for name, state in self._agents.items()
@@ -263,12 +351,17 @@ class TeamManager:
             List of dicts: [{"round": N, "from": name, "content": text, "timestamp": ts}]
         """
         import uuid as _uuid
+
         debate_thread = thread_id or f"debate-{_uuid.uuid4().hex[:8]}"
         transcript: list[dict[str, Any]] = []
 
         logger.info(
             "Starting devil's advocate debate: %s vs %s on '%s' (%d rounds, thread=%s)",
-            agent_a, agent_b, topic[:60], rounds, debate_thread,
+            agent_a,
+            agent_b,
+            topic[:60],
+            rounds,
+            debate_thread,
         )
 
         # Round 1: seed agent_a with the proposal request
@@ -280,7 +373,12 @@ class TeamManager:
             f"After writing your proposal, send it to '{agent_b}' using SendTeamMessage "
             f"with thread_id='{debate_thread}'."
         )
-        await self.send_to(agent_a, proposal_prompt, from_name="debate-coordinator", thread_id=debate_thread)
+        await self.send_to(
+            agent_a,
+            proposal_prompt,
+            from_name="debate-coordinator",
+            thread_id=debate_thread,
+        )
 
         # Collect transcript from the message bus as debate unfolds
         # We poll the _all directory and filter by thread_id
@@ -298,7 +396,8 @@ class TeamManager:
             while time.time() < deadline:
                 all_msgs = self.bus.get_all()
                 new_msgs = [
-                    m for m in all_msgs
+                    m
+                    for m in all_msgs
                     if m.thread_id == debate_thread
                     and m.from_agent == speaker_sending
                     and m.to_agent in (speaker_receiving, "*")
@@ -309,19 +408,29 @@ class TeamManager:
                 if new_msgs:
                     latest = max(new_msgs, key=lambda m: m.timestamp_ms)
                     seen_msg_ids.add(latest.message_id)
-                    transcript.append({
-                        "round": round_num,
-                        "from": latest.from_agent,
-                        "to": latest.to_agent,
-                        "content": latest.content,
-                        "timestamp": latest.timestamp,
-                        "thread_id": debate_thread,
-                    })
-                    logger.info("Debate round %d: %s → %s", round_num, latest.from_agent, latest.to_agent)
+                    transcript.append(
+                        {
+                            "round": round_num,
+                            "from": latest.from_agent,
+                            "to": latest.to_agent,
+                            "content": latest.content,
+                            "timestamp": latest.timestamp,
+                            "thread_id": debate_thread,
+                        }
+                    )
+                    logger.info(
+                        "Debate round %d: %s → %s",
+                        round_num,
+                        latest.from_agent,
+                        latest.to_agent,
+                    )
 
                     # Check for approval / consensus
                     content_lower = latest.content.lower()
-                    if "lgtm" in content_lower or '"type": "approval"' in latest.content:
+                    if (
+                        "lgtm" in content_lower
+                        or '"type": "approval"' in latest.content
+                    ):
                         logger.info("Debate consensus reached at round %d", round_num)
                         await self.send_to(
                             agent_a,
@@ -345,8 +454,10 @@ class TeamManager:
                                 f"Reply to '{agent_a}' via SendTeamMessage with thread_id='{debate_thread}'."
                             )
                             await self.send_to(
-                                agent_b, critique_prompt,
-                                from_name="debate-coordinator", thread_id=debate_thread,
+                                agent_b,
+                                critique_prompt,
+                                from_name="debate-coordinator",
+                                thread_id=debate_thread,
                             )
                         else:
                             # Prompt proposer to revise
@@ -360,8 +471,10 @@ class TeamManager:
                                 f"Reply to '{agent_b}' via SendTeamMessage with thread_id='{debate_thread}'."
                             )
                             await self.send_to(
-                                agent_a, revision_prompt,
-                                from_name="debate-coordinator", thread_id=debate_thread,
+                                agent_a,
+                                revision_prompt,
+                                from_name="debate-coordinator",
+                                thread_id=debate_thread,
                             )
                     break
 
@@ -369,25 +482,33 @@ class TeamManager:
 
             else:
                 # Timeout waiting for round
-                logger.warning("Debate round %d timed out waiting for %s", round_num, speaker_sending)
-                transcript.append({
-                    "round": round_num,
-                    "from": "debate-coordinator",
-                    "content": f"TIMEOUT: {speaker_sending} did not respond within 5 minutes",
-                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
-                })
+                logger.warning(
+                    "Debate round %d timed out waiting for %s",
+                    round_num,
+                    speaker_sending,
+                )
+                transcript.append(
+                    {
+                        "round": round_num,
+                        "from": "debate-coordinator",
+                        "content": f"TIMEOUT: {speaker_sending} did not respond within 5 minutes",
+                        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
+                    }
+                )
                 break
 
         # Final wrap-up
         await self.send_to(
             agent_a,
             f"DEBATE COMPLETE — {rounds} rounds concluded. Proceed with your work.",
-            from_name="debate-coordinator", thread_id=debate_thread,
+            from_name="debate-coordinator",
+            thread_id=debate_thread,
         )
         await self.send_to(
             agent_b,
             f"DEBATE COMPLETE — {rounds} rounds concluded. Proceed with your work.",
-            from_name="debate-coordinator", thread_id=debate_thread,
+            from_name="debate-coordinator",
+            thread_id=debate_thread,
         )
 
         return transcript
@@ -474,12 +595,16 @@ class TeamManager:
         output_file = self.output_dir / f"{state.name}.md"
 
         # Task: if no initial task given, agent should poll for messages
-        task = state.task if state.task else (
-            f"You are {state.name} on team '{self.team_id}'. "
-            f"Your role: {state.role}. "
-            f"No initial task assigned. Call ReadTeamMessages to check for assignments. "
-            f"After each task, call ReadTeamMessages again. "
-            f'Only stop if you receive a {{"type": "shutdown"}} message.'
+        task = (
+            state.task
+            if state.task
+            else (
+                f"You are {state.name} on team '{self.team_id}'. "
+                f"Your role: {state.role}. "
+                f"No initial task assigned. Call ReadTeamMessages to check for assignments. "
+                f"After each task, call ReadTeamMessages again. "
+                f'Only stop if you receive a {{"type": "shutdown"}} message.'
+            )
         )
 
         runner = AutonomousRunner(
@@ -509,7 +634,9 @@ class TeamManager:
         _intercept: dict[str, Any] = {}
 
         @hooks.hook("pre_tool_use")
-        async def intercept_team_tools(tool_name: str, params: dict, **_kwargs: Any) -> dict | None:
+        async def intercept_team_tools(
+            tool_name: str, params: dict, **_kwargs: Any
+        ) -> dict | None:
             if tool_name in ("SendTeamMessage", "ReadTeamMessages"):
                 _intercept["pending"] = (tool_name, params)
                 # Return params unchanged — we'll handle in post hook via a side channel
@@ -559,6 +686,7 @@ class TeamManager:
         # So we register the tools in _EXECUTORS at runtime.
 
         from .tools import _EXECUTORS  # type: ignore[attr-defined]
+
         _EXECUTORS["SendTeamMessage"] = lambda p, **kw: send_team_message(p, **kw)
         _EXECUTORS["ReadTeamMessages"] = lambda p, **kw: read_team_messages(p, **kw)
 
@@ -604,6 +732,7 @@ class TeamManager:
                         kwargs["message_bus"] = mbus
                         kwargs["agent_name"] = aname
                         return await fn(params, **kwargs)
+
                     return wrapper
 
                 _EXECUTORS["SendTeamMessage"] = _make_team_wrapper(
@@ -640,18 +769,90 @@ class TeamManager:
             state.turns = result.turns
             state.status = "completed" if result.success else "error"
 
+            # Record turn metrics in observability
+            global_metrics.record_turn(
+                agent_name=state.name,
+                model=state.model,
+                team_id=self.team_id,
+            )
+            global_metrics.set_agent_state(state.name, state.status)
+
+            # Save final memory state
+            self._save_agent_memory(state, result)
+
             # Write output file
             await self._write_output(state, result)
 
+            # Fire agent_completed webhook
+            await self._fire_webhook(WebhookEvent.AGENT_COMPLETED.value, {
+                "team_id": self.team_id,
+                "agent_name": state.name,
+                "model": state.model,
+                "status": state.status,
+                "turns": state.turns,
+                "summary": (result.final_text or "")[:200],
+            })
+
         except asyncio.CancelledError:
             state.status = "stopped"
+            global_metrics.set_agent_state(state.name, "stopped")
             logger.info("Agent '%s' task cancelled", state.name)
             raise
         except Exception as exc:
             state.status = "error"
+            global_metrics.set_agent_state(state.name, "error")
             logger.error("Agent '%s' raised: %s", state.name, exc, exc_info=True)
 
+            # Fire agent_error webhook
+            await self._fire_webhook(WebhookEvent.AGENT_FAILED.value, {
+                "team_id": self.team_id,
+                "agent_name": state.name,
+                "model": state.model,
+                "error": str(exc),
+            })
+
         logger.info("Agent '%s' finished with status=%s", state.name, state.status)
+
+    # ── Integration helpers ─────────────────────────────────────────────────────
+
+    async def _fire_webhook(self, event: str, data: dict[str, Any]) -> None:
+        """Fire a webhook event if a WebhookManager is configured.
+
+        Uses fire-and-forget — webhooks never block agent work.
+        """
+        if self._webhook is not None:
+            try:
+                await self._webhook.fire(event, data)
+            except Exception as exc:
+                logger.warning("Webhook fire failed for '%s': %s", event, exc)
+
+    def _save_agent_memory(self, state: AgentState, result: RunResult) -> None:
+        """Persist agent conversation state to memory if configured."""
+        if state.name not in self._agent_memories:
+            return
+        mem = self._agent_memories[state.name]
+        try:
+            # Build a lightweight conversation summary from the result
+            conversation: list[dict[str, Any]] = []
+            if result.final_text:
+                conversation.append({
+                    "role": "assistant",
+                    "content": result.final_text,
+                })
+            mem.save_state(
+                agent_name=state.name,
+                conversation=conversation,
+                metadata={
+                    "model": state.model,
+                    "team_id": self.team_id,
+                    "turns": result.turns,
+                    "tool_calls": result.total_tool_calls,
+                    "status": state.status,
+                    "stopped_reason": result.stopped_reason,
+                },
+            )
+        except Exception as exc:
+            logger.warning("Memory save failed for '%s': %s", state.name, exc)
 
     # ── Helpers ────────────────────────────────────────────────────────────────
 

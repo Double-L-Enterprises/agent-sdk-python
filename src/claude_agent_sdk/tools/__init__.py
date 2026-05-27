@@ -7,9 +7,9 @@ from typing import Any
 
 from .bash import BASH_TOOL_DEF, execute_bash
 from .file_ops import FILE_OPS_TOOL_DEFS, execute_file_op
+from .mcp_bridge import MCPBridge
 from .search import SEARCH_TOOL_DEF, execute_search
 from .spawn_agent import SPAWN_AGENT_TOOL_DEF, execute_spawn_agent
-from .mcp_bridge import MCPBridge
 
 logger = logging.getLogger(__name__)
 
@@ -50,11 +50,14 @@ def team_tools() -> list[dict[str, Any]]:
     Returns:
         List of two tool definitions: SendTeamMessage and ReadTeamMessages.
     """
-    from .team_message import SEND_TEAM_MESSAGE_TOOL, READ_TEAM_MESSAGES_TOOL
+    from .team_message import READ_TEAM_MESSAGES_TOOL, SEND_TEAM_MESSAGE_TOOL
+
     return [SEND_TEAM_MESSAGE_TOOL, READ_TEAM_MESSAGES_TOOL]
 
 
-async def dispatch_tool(name: str, params: dict[str, Any], cwd: str | None = None, **kwargs: Any) -> str:
+async def dispatch_tool(
+    name: str, params: dict[str, Any], cwd: str | None = None, **kwargs: Any
+) -> str:
     """Dispatch a tool call by name and return the string result.
 
     Args:
@@ -71,6 +74,7 @@ async def dispatch_tool(name: str, params: dict[str, Any], cwd: str | None = Non
     # Handle team communication tools
     if name == "SendTeamMessage":
         from .team_message import send_team_message
+
         try:
             return await send_team_message(params, **kwargs)
         except Exception as exc:  # noqa: BLE001
@@ -79,6 +83,7 @@ async def dispatch_tool(name: str, params: dict[str, Any], cwd: str | None = Non
 
     if name == "ReadTeamMessages":
         from .team_message import read_team_messages
+
         try:
             return await read_team_messages(params, **kwargs)
         except Exception as exc:  # noqa: BLE001

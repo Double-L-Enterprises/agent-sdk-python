@@ -38,7 +38,7 @@ _PRICING: list[tuple[str, float, float]] = [
     # Free / self-hosted
     ("qwen/", 0.0, 0.0),
     ("nvidia/", 0.0, 0.0),
-    ("openai/", 0.0, 0.0),           # usually routed through local LiteLLM
+    ("openai/", 0.0, 0.0),  # usually routed through local LiteLLM
     ("mistral/", 0.0, 0.0),
     ("meta-llama/", 0.0, 0.0),
     ("deepseek/", 0.0, 0.0),
@@ -73,6 +73,7 @@ def estimate_cost(model: str, input_tokens: int, output_tokens: int) -> float:
 
 
 # ── Turn record ───────────────────────────────────────────────────────────────
+
 
 @dataclass
 class TurnRecord:
@@ -116,6 +117,7 @@ class TurnRecord:
 
 # ── Budget policy ─────────────────────────────────────────────────────────────
 
+
 @dataclass
 class BudgetPolicy:
     """Spending limits for budget enforcement.
@@ -125,24 +127,25 @@ class BudgetPolicy:
     per-agent budget is exceeded instead of hard-pausing.
     """
 
-    max_cost_per_agent: float | None = None   # USD; applies per agent instance
-    max_cost_per_team: float | None = None    # USD; total across all team members
-    max_cost_per_run: float | None = None     # USD; entire tracker lifetime
-    auto_switch_model: str | None = None      # e.g. "qwen/qwen3-max" (free fallback)
+    max_cost_per_agent: float | None = None  # USD; applies per agent instance
+    max_cost_per_team: float | None = None  # USD; total across all team members
+    max_cost_per_run: float | None = None  # USD; entire tracker lifetime
+    auto_switch_model: str | None = None  # e.g. "qwen/qwen3-max" (free fallback)
 
 
 # ── Budget exceeded event ─────────────────────────────────────────────────────
+
 
 @dataclass
 class BudgetExceededEvent:
     """Raised when a budget limit is hit."""
 
-    limit_type: str        # "agent" | "team" | "run"
+    limit_type: str  # "agent" | "team" | "run"
     agent_name: str
     team_id: str | None
     limit_usd: float
     actual_usd: float
-    suggested_model: str | None   # auto_switch_model from BudgetPolicy, or None
+    suggested_model: str | None  # auto_switch_model from BudgetPolicy, or None
     timestamp: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%S"))
 
     def to_dict(self) -> dict[str, Any]:
@@ -159,6 +162,7 @@ class BudgetExceededEvent:
 
 
 # ── CostTracker ───────────────────────────────────────────────────────────────
+
 
 class CostTracker:
     """Tracks token usage and cost across agents, teams, and runs.
@@ -290,19 +294,31 @@ class CostTracker:
         logger.debug(record.to_log_line())
 
         # Accumulate agent totals
-        self._agent_tokens_in[agent_name] = self._agent_tokens_in.get(agent_name, 0) + input_tokens
-        self._agent_tokens_out[agent_name] = self._agent_tokens_out.get(agent_name, 0) + output_tokens
+        self._agent_tokens_in[agent_name] = (
+            self._agent_tokens_in.get(agent_name, 0) + input_tokens
+        )
+        self._agent_tokens_out[agent_name] = (
+            self._agent_tokens_out.get(agent_name, 0) + output_tokens
+        )
         self._agent_cost[agent_name] = self._agent_cost.get(agent_name, 0.0) + cost
 
         # Accumulate team totals
         if team_id:
-            self._team_tokens_in[team_id] = self._team_tokens_in.get(team_id, 0) + input_tokens
-            self._team_tokens_out[team_id] = self._team_tokens_out.get(team_id, 0) + output_tokens
+            self._team_tokens_in[team_id] = (
+                self._team_tokens_in.get(team_id, 0) + input_tokens
+            )
+            self._team_tokens_out[team_id] = (
+                self._team_tokens_out.get(team_id, 0) + output_tokens
+            )
             self._team_cost[team_id] = self._team_cost.get(team_id, 0.0) + cost
 
         # Accumulate model totals
-        self._model_tokens_in[model] = self._model_tokens_in.get(model, 0) + input_tokens
-        self._model_tokens_out[model] = self._model_tokens_out.get(model, 0) + output_tokens
+        self._model_tokens_in[model] = (
+            self._model_tokens_in.get(model, 0) + input_tokens
+        )
+        self._model_tokens_out[model] = (
+            self._model_tokens_out.get(model, 0) + output_tokens
+        )
         self._model_cost[model] = self._model_cost.get(model, 0.0) + cost
 
         # Run totals
@@ -334,8 +350,12 @@ class CostTracker:
                 )
                 logger.warning(
                     "Budget exceeded: agent=%s limit=$%.4f actual=$%.4f%s",
-                    agent_name, p.max_cost_per_agent, agent_total,
-                    f" → suggest model={p.auto_switch_model}" if p.auto_switch_model else "",
+                    agent_name,
+                    p.max_cost_per_agent,
+                    agent_total,
+                    f" → suggest model={p.auto_switch_model}"
+                    if p.auto_switch_model
+                    else "",
                 )
                 return event
 
@@ -354,7 +374,9 @@ class CostTracker:
                 )
                 logger.warning(
                     "Budget exceeded: team=%s limit=$%.4f actual=$%.4f",
-                    team_id, p.max_cost_per_team, team_total,
+                    team_id,
+                    p.max_cost_per_team,
+                    team_total,
                 )
                 return event
 
@@ -371,7 +393,8 @@ class CostTracker:
             )
             logger.warning(
                 "Budget exceeded: run limit=$%.4f actual=$%.4f",
-                p.max_cost_per_run, self._run_cost,
+                p.max_cost_per_run,
+                self._run_cost,
             )
             return event
 

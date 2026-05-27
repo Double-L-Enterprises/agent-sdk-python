@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 # ── Voting modes ─────────────────────────────────────────────────────────────
 
+
 class VoteMode(str, Enum):
     """Determines how individual votes are tallied into a decision."""
 
@@ -45,16 +46,17 @@ class VoteMode(str, Enum):
 
 # ── Result dataclasses ────────────────────────────────────────────────────────
 
+
 @dataclass
 class AgentVote:
     """A single agent's vote on a topic."""
 
     agent_name: str
-    choice: str            # The option the agent voted for (MAJORITY / WEIGHTED)
-    ranking: list[str]     # Ordered preference list (RANKED mode)
-    reasoning: str         # The agent's stated rationale
-    confidence: float      # 0.0–1.0 self-reported confidence
-    weight: float = 1.0    # Effective vote weight (applied in WEIGHTED mode)
+    choice: str  # The option the agent voted for (MAJORITY / WEIGHTED)
+    ranking: list[str]  # Ordered preference list (RANKED mode)
+    reasoning: str  # The agent's stated rationale
+    confidence: float  # 0.0–1.0 self-reported confidence
+    weight: float = 1.0  # Effective vote weight (applied in WEIGHTED mode)
     timestamp: str = field(default_factory=lambda: time.strftime("%Y-%m-%dT%H:%M:%S"))
 
 
@@ -66,7 +68,7 @@ class VoteRecord:
     options: list[str]
     mode: VoteMode
     votes: list[AgentVote]
-    winner: str | None            # Winning option, or None if deadlocked
+    winner: str | None  # Winning option, or None if deadlocked
     deadlocked: bool
     rounds: list[dict[str, Any]]  # Debate transcript (if resolve_disagreement)
     vote_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
@@ -98,6 +100,7 @@ class VoteRecord:
 
 
 # ── ConsensusManager ──────────────────────────────────────────────────────────
+
 
 class ConsensusManager:
     """Structured decision-making for multi-agent teams.
@@ -189,7 +192,10 @@ class ConsensusManager:
 
         logger.info(
             "Starting vote '%s' on topic: %s | mode=%s | agents=%s",
-            vote_id, topic[:80], mode.value, agents,
+            vote_id,
+            topic[:80],
+            mode.value,
+            agents,
         )
 
         # Deliver vote request to each agent
@@ -272,7 +278,10 @@ class ConsensusManager:
 
         logger.info(
             "resolve_disagreement: %s vs %s on '%s' (thread=%s)",
-            agent_a, agent_b, topic[:80], debate_thread,
+            agent_a,
+            agent_b,
+            topic[:80],
+            debate_thread,
         )
 
         # Seed both agents with opposing positions
@@ -293,11 +302,15 @@ class ConsensusManager:
             f"Wait for {agent_a}'s rebuttal, then respond via SendTeamMessage "
             f"with thread_id='{debate_thread}'. Be specific. Max 300 words."
         )
-        await self.tm.send_to(agent_a, seed_a, from_name="consensus-manager", thread_id=debate_thread)
-        await self.tm.send_to(agent_b, seed_b, from_name="consensus-manager", thread_id=debate_thread)
+        await self.tm.send_to(
+            agent_a, seed_a, from_name="consensus-manager", thread_id=debate_thread
+        )
+        await self.tm.send_to(
+            agent_b, seed_b, from_name="consensus-manager", thread_id=debate_thread
+        )
 
         # Notify arbiters (observers only — vote at the end)
-        for arbiter in (arbiter_agents or []):
+        for arbiter in arbiter_agents or []:
             await self.tm.send_to(
                 arbiter,
                 (
@@ -320,14 +333,19 @@ class ConsensusManager:
             speaker = agent_a if round_num % 2 == 1 else agent_b
             listener = agent_b if round_num % 2 == 1 else agent_a
 
-            round_entry: dict[str, Any] = {"round": round_num, "from": speaker, "messages": []}
+            round_entry: dict[str, Any] = {
+                "round": round_num,
+                "from": speaker,
+                "messages": [],
+            }
             deadline = time.time() + self.max_vote_wait_seconds
 
             message_received = False
             while time.time() < deadline:
                 all_msgs = self.tm.bus.get_all()
                 new_msgs = [
-                    m for m in all_msgs
+                    m
+                    for m in all_msgs
                     if m.thread_id == debate_thread
                     and m.from_agent == speaker
                     and m.to_agent in (listener, "*")
@@ -337,20 +355,28 @@ class ConsensusManager:
                 if new_msgs:
                     latest = max(new_msgs, key=lambda m: m.timestamp_ms)
                     seen_ids.add(latest.message_id)
-                    round_entry["messages"].append({
-                        "from": latest.from_agent,
-                        "to": latest.to_agent,
-                        "content": latest.content,
-                        "timestamp": latest.timestamp,
-                    })
+                    round_entry["messages"].append(
+                        {
+                            "from": latest.from_agent,
+                            "to": latest.to_agent,
+                            "content": latest.content,
+                            "timestamp": latest.timestamp,
+                        }
+                    )
                     message_received = True
 
                     # Check for early consensus
                     content_upper = latest.content.upper()
-                    if "AGREE" in content_upper or "ACCEPT" in content_upper or "LGTM" in content_upper:
+                    if (
+                        "AGREE" in content_upper
+                        or "ACCEPT" in content_upper
+                        or "LGTM" in content_upper
+                    ):
                         round_entry["early_consensus"] = True
                         rounds.append(round_entry)
-                        logger.info("Early consensus detected in debate round %d", round_num)
+                        logger.info(
+                            "Early consensus detected in debate round %d", round_num
+                        )
                         break
 
                     # Prompt next speaker if not final round
@@ -364,8 +390,10 @@ class ConsensusManager:
                             f"with thread_id='{debate_thread}'."
                         )
                         await self.tm.send_to(
-                            listener, next_prompt,
-                            from_name="consensus-manager", thread_id=debate_thread,
+                            listener,
+                            next_prompt,
+                            from_name="consensus-manager",
+                            thread_id=debate_thread,
                         )
                     break
 
@@ -373,7 +401,9 @@ class ConsensusManager:
 
             if not message_received:
                 round_entry["timeout"] = True
-                logger.warning("Debate round %d timed out waiting for %s", round_num, speaker)
+                logger.warning(
+                    "Debate round %d timed out waiting for %s", round_num, speaker
+                )
 
             rounds.append(round_entry)
 
@@ -423,7 +453,9 @@ class ConsensusManager:
             instruction = (
                 "Rank ALL options from most preferred (1) to least preferred. "
                 "Reply with a JSON object:\n"
-                '{"vote_id": "' + vote_id + '", "ranking": ["first choice", "second choice", ...], '
+                '{"vote_id": "'
+                + vote_id
+                + '", "ranking": ["first choice", "second choice", ...], '
                 '"reasoning": "your analysis", "confidence": 0.0-1.0}'
             )
         else:
@@ -485,7 +517,10 @@ class ConsensusManager:
         # Timeout: record abstentions for non-responding agents
         for agent_name in agents:
             if agent_name not in collected:
-                logger.warning("Agent '%s' did not vote within timeout — recording abstention", agent_name)
+                logger.warning(
+                    "Agent '%s' did not vote within timeout — recording abstention",
+                    agent_name,
+                )
                 collected[agent_name] = AgentVote(
                     agent_name=agent_name,
                     choice=options[0] if options else "",
@@ -576,7 +611,7 @@ class ConsensusManager:
         votes: list[AgentVote],
         options: list[str],
     ) -> tuple[str | None, bool]:
-        tally: dict[str, int] = {opt: 0 for opt in options}
+        tally: dict[str, int] = dict.fromkeys(options, 0)
         for v in votes:
             if v.choice in tally:
                 tally[v.choice] += 1
@@ -595,7 +630,7 @@ class ConsensusManager:
         votes: list[AgentVote],
         options: list[str],
     ) -> tuple[str | None, bool]:
-        tally: dict[str, float] = {opt: 0.0 for opt in options}
+        tally: dict[str, float] = dict.fromkeys(options, 0.0)
         for v in votes:
             if v.choice in tally:
                 tally[v.choice] += v.weight
@@ -634,7 +669,7 @@ class ConsensusManager:
         ballots = [list(v.ranking) for v in votes]
 
         while len(remaining) > 1:
-            first_pref_count: dict[str, int] = {opt: 0 for opt in remaining}
+            first_pref_count: dict[str, int] = dict.fromkeys(remaining, 0)
             for ballot in ballots:
                 for choice in ballot:
                     if choice in first_pref_count:

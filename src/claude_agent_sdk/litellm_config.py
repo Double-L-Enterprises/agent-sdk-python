@@ -22,9 +22,7 @@ class LiteLLMConfig:
     def from_env(cls) -> LiteLLMConfig:
         """Load config from environment variables with defaults."""
         return cls(
-            base_url=os.environ.get(
-                "LITELLM_BASE_URL", "http://127.0.0.1:8016"
-            ),
+            base_url=os.environ.get("LITELLM_BASE_URL", "http://127.0.0.1:8016"),
             api_key=os.environ.get(
                 "LITELLM_API_KEY",
                 "sk-bbc8dc18c88aed96187cb3dea585b900e79601fd9f0fcf6cc93170b0e89fcca1",

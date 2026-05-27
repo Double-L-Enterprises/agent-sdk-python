@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 
 from . import Transport
+from ...rate_limiter import global_rate_limiter
 
 logger = logging.getLogger(__name__)
 
@@ -151,16 +152,20 @@ class LiteLLMHTTPTransport(Transport):
         """Append a user turn to the conversation history."""
         self._messages.append({"role": "user", "content": content})
 
-    def add_tool_result(self, tool_call_id: str, content: str, is_error: bool = False) -> None:
+    def add_tool_result(
+        self, tool_call_id: str, content: str, is_error: bool = False
+    ) -> None:
         """Append a tool result to the conversation history."""
         result_content = content
         if is_error:
             result_content = f"[ERROR] {content}"
-        self._messages.append({
-            "role": "tool",
-            "tool_call_id": tool_call_id,
-            "content": result_content,
-        })
+        self._messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": result_content,
+            }
+        )
 
     async def do_turn(self) -> dict[str, Any]:
         """Send the current conversation to LiteLLM and return the parsed response.
@@ -197,16 +202,20 @@ class LiteLLMHTTPTransport(Transport):
             len(self._tools),
         )
 
-        resp = await self._client.post(
-            f"{self._base_url}/v1/chat/completions",
-            json=payload,
-        )
+        # ── Rate limiting: acquire slot before API call ───────────────
+        await global_rate_limiter.acquire(self._model)
+        try:
+            resp = await self._client.post(
+                f"{self._base_url}/v1/chat/completions",
+                json=payload,
+            )
+        finally:
+            # Release concurrency slot regardless of success/failure
+            global_rate_limiter.release(self._model)
 
         if resp.status_code != 200:
             body = resp.text[:500]
-            raise RuntimeError(
-                f"LiteLLM returned HTTP {resp.status_code}: {body}"
-            )
+            raise RuntimeError(f"LiteLLM returned HTTP {resp.status_code}: {body}")
 
         raw = resp.json()
         choice = raw["choices"][0]
@@ -232,7 +241,9 @@ class LiteLLMHTTPTransport(Transport):
             "raw": raw,
         }
 
-    def build_sdk_assistant_message(self, turn_result: dict[str, Any]) -> dict[str, Any]:
+    def build_sdk_assistant_message(
+        self, turn_result: dict[str, Any]
+    ) -> dict[str, Any]:
         """Convert a do_turn() result into SDK-format assistant message dict."""
         content_blocks: list[dict[str, Any]] = []
 
@@ -246,12 +257,14 @@ class LiteLLMHTTPTransport(Transport):
             except json.JSONDecodeError:
                 tool_input = {"raw": fn.get("arguments", "")}
 
-            content_blocks.append({
-                "type": "tool_use",
-                "id": tc["id"],
-                "name": fn.get("name", "unknown"),
-                "input": tool_input,
-            })
+            content_blocks.append(
+                {
+                    "type": "tool_use",
+                    "id": tc["id"],
+                    "name": fn.get("name", "unknown"),
+                    "input": tool_input,
+                }
+            )
 
         usage_raw = turn_result["raw"].get("usage", {})
         usage = {

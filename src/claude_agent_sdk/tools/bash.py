@@ -77,10 +77,7 @@ async def execute_bash(params: dict[str, Any], cwd: str | None = None) -> str:
         except asyncio.TimeoutError:
             proc.kill()
             await proc.communicate()
-            return (
-                f"[ERROR] Command timed out after {timeout}s\n"
-                f"Command: {command}"
-            )
+            return f"[ERROR] Command timed out after {timeout}s\nCommand: {command}"
 
         stdout = _truncate(stdout_bytes.decode("utf-8", errors="replace"))
         stderr = _truncate(stderr_bytes.decode("utf-8", errors="replace"))
@@ -104,6 +101,8 @@ async def execute_bash(params: dict[str, Any], cwd: str | None = None) -> str:
 
 def _truncate(text: str) -> str:
     if len(text.encode("utf-8")) > _MAX_OUTPUT_BYTES:
-        truncated = text.encode("utf-8")[:_MAX_OUTPUT_BYTES].decode("utf-8", errors="ignore")
+        truncated = text.encode("utf-8")[:_MAX_OUTPUT_BYTES].decode(
+            "utf-8", errors="ignore"
+        )
         return truncated + "\n[...output truncated]"
     return text

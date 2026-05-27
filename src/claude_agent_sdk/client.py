@@ -11,6 +11,7 @@ from ._errors import CLIConnectionError
 
 if TYPE_CHECKING:
     from ._internal.session_resume import MaterializedResume
+    from .team_manager import TeamManager
 from .types import (
     ClaudeAgentOptions,
     ContextUsageResponse,
@@ -631,6 +632,105 @@ class ClaudeSDKClient:
         if self._materialized is not None:
             await self._materialized.cleanup()
             self._materialized = None
+
+    # ── Team convenience methods ────────────────────────────────────────────
+
+    def create_team(
+        self,
+        name: str,
+        description: str | None = None,
+        output_dir: str = "~/.claude/agent-logs/teams/",
+        base_url: str = "http://127.0.0.1:8016",
+        api_key: str = "sk-bbc8dc18c88aed96187cb3dea585b900e79601fd9f0fcf6cc93170b0e89fcca1",
+    ) -> "TeamManager":
+        """Create a new TeamManager instance for multi-agent coordination.
+
+        Args:
+            name: Unique team identifier. Used to namespace messages.
+            description: Optional human-readable description (logged, not functional).
+            output_dir: Directory for agent output files.
+            base_url: LiteLLM base URL for all agents.
+            api_key: API key for the LiteLLM endpoint.
+
+        Returns:
+            A TeamManager ready for add_agent() calls, then start_all().
+
+        Example::
+            client = ClaudeSDKClient()
+            tm = client.create_team("api-build", description="REST API feature team")
+            await tm.add_agent("planner", model="qwen/qwen3-max", role="Architect", task="Design the API")
+            await tm.start_all()
+        """
+        from .team_manager import TeamManager
+
+        return TeamManager(
+            team_id=name,
+            output_dir=output_dir,
+            base_url=base_url,
+            api_key=api_key,
+        )
+
+    def create_team_from_template(
+        self,
+        template_name: str,
+        task: str = "",
+        output_dir: str = "~/.claude/agent-logs/teams/",
+        **overrides: Any,
+    ) -> "TeamManager":
+        """Create a fully configured TeamManager from a named template.
+
+        Uses team_templates.create_team_from_template() under the hood.
+        All keyword arguments are forwarded as overrides (base_url, api_key,
+        team_id, persona_overrides).
+
+        Args:
+            template_name: Template name (e.g. "full_stack_team").
+                Call list_templates() to see options.
+            task: Seed task delivered to the first agent in the template's flow.
+            output_dir: Directory for agent output files.
+            **overrides: Forwarded to create_team_from_template().
+
+        Returns:
+            A TeamManager with all agents registered (not yet started).
+
+        Example::
+            client = ClaudeSDKClient()
+            tm = client.create_team_from_template("code_review_pair", task="Review auth module")
+            await tm.start_all()
+            results = await tm.wait_for_completion()
+        """
+        from .team_templates import create_team_from_template
+
+        return create_team_from_template(
+            template_name=template_name,
+            task=task,
+            output_dir=output_dir,
+            **overrides,
+        )
+
+    @staticmethod
+    def list_templates() -> list[dict[str, Any]]:
+        """Return all available team templates with descriptions.
+
+        Returns:
+            List of dicts with name, description, agent_count,
+            communication_pattern, task_flow, metadata.
+        """
+        from .team_templates import list_templates
+
+        return list_templates()
+
+    @staticmethod
+    def list_personas() -> list[dict[str, Any]]:
+        """Return all available agent personas with their metadata.
+
+        Returns:
+            List of dicts with name, expertise, review_focus,
+            communication_style, flags_by_default.
+        """
+        from .agent_personas import list_personas
+
+        return list_personas()
 
     async def __aenter__(self) -> "ClaudeSDKClient":
         """Enter async context - automatically connects with empty stream for interactive use."""

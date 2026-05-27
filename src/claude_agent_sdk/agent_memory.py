@@ -36,6 +36,7 @@ logger = logging.getLogger(__name__)
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _now() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%S")
 
@@ -63,6 +64,7 @@ def _write_json(path: Path, data: Any) -> None:
 
 
 # ── AgentMemory ───────────────────────────────────────────────────────────────
+
 
 class AgentMemory:
     """Persists agent conversation state and shared team knowledge to disk.
@@ -150,7 +152,9 @@ class AgentMemory:
         }
         _write_json(path, payload)
         logger.debug(
-            "AgentMemory: saved state for '%s' (%d messages)", agent_name, len(conversation)
+            "AgentMemory: saved state for '%s' (%d messages)",
+            agent_name,
+            len(conversation),
         )
 
     def load_state(self, agent_name: str) -> dict[str, Any] | None:
@@ -323,9 +327,7 @@ class AgentMemory:
         if not self._root.exists():
             return []
         return [
-            d.name
-            for d in self._root.iterdir()
-            if d.is_dir() and d.name != "_team"
+            d.name for d in self._root.iterdir() if d.is_dir() and d.name != "_team"
         ]
 
     def status(self) -> dict[str, Any]:
@@ -337,12 +339,14 @@ class AgentMemory:
         agents = []
         for name in self.list_agents():
             state = self.load_state(name)
-            agents.append({
-                "name": name,
-                "has_conversation": state is not None,
-                "message_count": state["message_count"] if state else 0,
-                "saved_at": state["saved_at"] if state else None,
-            })
+            agents.append(
+                {
+                    "name": name,
+                    "has_conversation": state is not None,
+                    "message_count": state["message_count"] if state else 0,
+                    "saved_at": state["saved_at"] if state else None,
+                }
+            )
 
         team_knowledge = _read_json(self._team_knowledge_path, {})
         team_notes = self.team_read_notes()
@@ -360,6 +364,7 @@ class AgentMemory:
         Use with caution: irreversible.  Does not remove directories.
         """
         import shutil
+
         if self._root.exists():
             shutil.rmtree(self._root)
             self._root.mkdir(parents=True, exist_ok=True)

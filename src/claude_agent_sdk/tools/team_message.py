@@ -22,7 +22,6 @@ from typing import Any
 
 from ..message_bus import Message, MessageBus
 
-
 # ── Tool definitions (OpenAI function-calling format) ─────────────────────────
 
 SEND_TEAM_MESSAGE_TOOL: dict[str, Any] = {
@@ -92,6 +91,7 @@ def team_tools() -> list[dict[str, Any]]:
 
 
 # ── Tool executors ─────────────────────────────────────────────────────────────
+
 
 async def send_team_message(params: dict[str, Any], **kwargs: Any) -> str:
     """Execute the SendTeamMessage tool.

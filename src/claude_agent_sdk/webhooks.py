@@ -16,7 +16,6 @@ Created: 2026-05-27 CST
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import smtplib
 import time
@@ -29,6 +28,7 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # ─── Event types ──────────────────────────────────────────────────────────────
+
 
 class WebhookEvent(str, Enum):
     TEAM_STARTED = "team_started"
@@ -45,15 +45,17 @@ ALL_EVENTS: frozenset[str] = frozenset(e.value for e in WebhookEvent)
 
 # ─── Target config ─────────────────────────────────────────────────────────────
 
+
 class WebhookFormat(str, Enum):
-    HTTP = "http"        # Generic JSON POST
-    SLACK = "slack"      # Slack Block Kit formatted message
-    EMAIL = "email"      # SMTP email
+    HTTP = "http"  # Generic JSON POST
+    SLACK = "slack"  # Slack Block Kit formatted message
+    EMAIL = "email"  # SMTP email
 
 
 @dataclass
 class SMTPConfig:
     """SMTP configuration for email webhooks."""
+
     host: str
     port: int = 587
     username: str = ""
@@ -76,6 +78,7 @@ class WebhookTarget:
         headers: Extra HTTP headers (e.g., Authorization).
         name: Human-readable label for logging.
     """
+
     url: str = ""
     events_filter: set[str] = field(default_factory=set)  # empty = all
     format: WebhookFormat = WebhookFormat.HTTP
@@ -85,6 +88,7 @@ class WebhookTarget:
 
 
 # ─── Payload builders ─────────────────────────────────────────────────────────
+
 
 def _build_http_payload(event: str, data: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -134,19 +138,26 @@ def _build_slack_payload(event: str, data: dict[str, Any]) -> dict[str, Any]:
         fields_block.append({"type": "mrkdwn", "text": f"*Cost:* ${cost:.4f}"})
 
     blocks: list[dict[str, Any]] = [
-        {"type": "header", "text": {"type": "plain_text", "text": header, "emoji": True}},
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": header, "emoji": True},
+        },
     ]
     if fields_block:
         blocks.append({"type": "section", "fields": fields_block[:10]})
     if summary:
-        blocks.append({
-            "type": "section",
-            "text": {"type": "mrkdwn", "text": f"*Output:* {summary[:500]}"},
-        })
-    blocks.append({
-        "type": "context",
-        "elements": [{"type": "mrkdwn", "text": f"_{ts}_"}],
-    })
+        blocks.append(
+            {
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"*Output:* {summary[:500]}"},
+            }
+        )
+    blocks.append(
+        {
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": f"_{ts}_"}],
+        }
+    )
 
     return {"blocks": blocks}
 
@@ -174,6 +185,7 @@ def _build_email_body(event: str, data: dict[str, Any]) -> str:
 
 # ─── Delivery ─────────────────────────────────────────────────────────────────
 
+
 async def _deliver_http(
     target: WebhookTarget,
     payload: dict[str, Any],
@@ -182,18 +194,29 @@ async def _deliver_http(
     """POST payload as JSON to target.url. Returns True on success."""
     try:
         import httpx
+
         headers = {"Content-Type": "application/json", **target.headers}
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.post(target.url, json=payload, headers=headers)
             if resp.status_code < 300:
-                logger.debug("[%s] HTTP webhook delivered (attempt %d, status %d)",
-                             target.name, attempt, resp.status_code)
+                logger.debug(
+                    "[%s] HTTP webhook delivered (attempt %d, status %d)",
+                    target.name,
+                    attempt,
+                    resp.status_code,
+                )
                 return True
-            logger.warning("[%s] HTTP webhook returned %d (attempt %d)",
-                           target.name, resp.status_code, attempt)
+            logger.warning(
+                "[%s] HTTP webhook returned %d (attempt %d)",
+                target.name,
+                resp.status_code,
+                attempt,
+            )
             return False
     except Exception as exc:
-        logger.warning("[%s] HTTP webhook attempt %d failed: %s", target.name, attempt, exc)
+        logger.warning(
+            "[%s] HTTP webhook attempt %d failed: %s", target.name, attempt, exc
+        )
         return False
 
 
@@ -253,6 +276,7 @@ def _deliver_email(
 
 # ─── WebhookManager ───────────────────────────────────────────────────────────
 
+
 class WebhookManager:
     """Fire lifecycle event notifications to configured webhook targets.
 
@@ -309,7 +333,9 @@ class WebhookManager:
             # Filter: skip if target has a filter and this event isn't in it
             if target.events_filter and event not in target.events_filter:
                 continue
-            tasks.append(asyncio.create_task(self._deliver_with_retry(target, event, data)))
+            tasks.append(
+                asyncio.create_task(self._deliver_with_retry(target, event, data))
+            )
 
         if tasks:
             # Fire-and-forget: gather without blocking the caller
@@ -329,9 +355,12 @@ class WebhookManager:
         for target in self._targets:
             if target.events_filter and event not in target.events_filter:
                 continue
-            tasks.append((target.name, asyncio.create_task(
-                self._deliver_with_retry(target, event, data)
-            )))
+            tasks.append(
+                (
+                    target.name,
+                    asyncio.create_task(self._deliver_with_retry(target, event, data)),
+                )
+            )
 
         for name, task in tasks:
             try:
@@ -353,12 +382,22 @@ class WebhookManager:
             if success:
                 return True
             if attempt < self.MAX_RETRIES:
-                wait = self.BACKOFF_BASE ** attempt
-                logger.info("[%s] Retry %d/%d in %.1fs", target.name, attempt, self.MAX_RETRIES, wait)
+                wait = self.BACKOFF_BASE**attempt
+                logger.info(
+                    "[%s] Retry %d/%d in %.1fs",
+                    target.name,
+                    attempt,
+                    self.MAX_RETRIES,
+                    wait,
+                )
                 await asyncio.sleep(wait)
 
-        logger.error("[%s] Webhook delivery failed after %d attempts for event '%s'",
-                     target.name, self.MAX_RETRIES, event)
+        logger.error(
+            "[%s] Webhook delivery failed after %d attempts for event '%s'",
+            target.name,
+            self.MAX_RETRIES,
+            event,
+        )
         return False
 
     async def _single_deliver(
@@ -380,9 +419,7 @@ class WebhookManager:
         elif target.format == WebhookFormat.EMAIL:
             # SMTP is blocking — run in thread executor
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                None, _deliver_email, target, event, data
-            )
+            return await loop.run_in_executor(None, _deliver_email, target, event, data)
 
         else:
             logger.error("[%s] Unknown webhook format: %s", target.name, target.format)

@@ -291,7 +291,11 @@ def get_persona(name: str) -> Persona | None:
     """
     persona = _PERSONA_REGISTRY.get(name)
     if persona is None:
-        logger.warning("Persona '%s' not found in registry. Available: %s", name, list(_PERSONA_REGISTRY.keys()))
+        logger.warning(
+            "Persona '%s' not found in registry. Available: %s",
+            name,
+            list(_PERSONA_REGISTRY.keys()),
+        )
     return persona
 
 

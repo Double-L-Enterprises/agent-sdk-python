@@ -12,7 +12,6 @@ Created: 2026-05-27 CST
 from __future__ import annotations
 
 import json
-import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -44,7 +43,7 @@ class Message:
         }
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Message":
+    def from_dict(cls, data: dict[str, Any]) -> Message:
         return cls(
             from_agent=data["from_agent"],
             to_agent=data["to_agent"],
@@ -155,6 +154,7 @@ class MessageBus:
             # Parse ISO timestamp to ms — approximate, good enough for filtering
             try:
                 import datetime
+
                 dt = datetime.datetime.fromisoformat(since.replace("Z", "+00:00"))
                 since_ms = int(dt.timestamp() * 1000)
             except Exception:
@@ -239,6 +239,7 @@ class MessageBus:
         if since:
             try:
                 import datetime
+
                 dt = datetime.datetime.fromisoformat(since.replace("Z", "+00:00"))
                 since_ms = int(dt.timestamp() * 1000)
             except Exception:

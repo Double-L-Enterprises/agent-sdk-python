@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
@@ -20,7 +19,10 @@ def default_tools() -> list[dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "command": {"type": "string", "description": "The bash command to execute"},
+                        "command": {
+                            "type": "string",
+                            "description": "The bash command to execute",
+                        },
                     },
                     "required": ["command"],
                 },
@@ -34,7 +36,10 @@ def default_tools() -> list[dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "file_path": {"type": "string", "description": "Path to the file to read"},
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to the file to read",
+                        },
                     },
                     "required": ["file_path"],
                 },
@@ -48,8 +53,14 @@ def default_tools() -> list[dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "file_path": {"type": "string", "description": "Path to the file to write"},
-                        "content": {"type": "string", "description": "Content to write"},
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to the file to write",
+                        },
+                        "content": {
+                            "type": "string",
+                            "description": "Content to write",
+                        },
                     },
                     "required": ["file_path", "content"],
                 },
@@ -63,9 +74,18 @@ def default_tools() -> list[dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "file_path": {"type": "string", "description": "Path to the file to edit"},
-                        "old_string": {"type": "string", "description": "Text to replace"},
-                        "new_string": {"type": "string", "description": "Replacement text"},
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to the file to edit",
+                        },
+                        "old_string": {
+                            "type": "string",
+                            "description": "Text to replace",
+                        },
+                        "new_string": {
+                            "type": "string",
+                            "description": "Replacement text",
+                        },
                     },
                     "required": ["file_path", "old_string", "new_string"],
                 },
@@ -79,7 +99,10 @@ def default_tools() -> list[dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "pattern": {"type": "string", "description": "Regex pattern to search"},
+                        "pattern": {
+                            "type": "string",
+                            "description": "Regex pattern to search",
+                        },
                         "path": {"type": "string", "description": "Path to search in"},
                     },
                     "required": ["pattern", "path"],
@@ -94,8 +117,14 @@ def default_tools() -> list[dict[str, Any]]:
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "pattern": {"type": "string", "description": "Glob pattern to match"},
-                        "path": {"type": "string", "description": "Base path to search"},
+                        "pattern": {
+                            "type": "string",
+                            "description": "Glob pattern to match",
+                        },
+                        "path": {
+                            "type": "string",
+                            "description": "Base path to search",
+                        },
                     },
                     "required": ["pattern"],
                 },
@@ -104,7 +133,9 @@ def default_tools() -> list[dict[str, Any]]:
     ]
 
 
-async def dispatch_tool(name: str, params: dict[str, Any], cwd: str | None = None) -> str:
+async def dispatch_tool(
+    name: str, params: dict[str, Any], cwd: str | None = None
+) -> str:
     """Dispatch a tool call to the appropriate handler."""
     try:
         if name == "bash":
@@ -159,7 +190,7 @@ async def _read_tool(params: dict[str, Any]) -> str:
         return "[ERROR] read: file_path is required"
 
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             content = f.read()
         return content[:50000]  # Limit to 50KB
     except FileNotFoundError:
@@ -194,7 +225,7 @@ async def _edit_tool(params: dict[str, Any]) -> str:
         return "[ERROR] edit: file_path, old_string, and new_string are required"
 
     try:
-        with open(file_path, "r", encoding="utf-8") as f:
+        with open(file_path, encoding="utf-8") as f:
             content = f.read()
 
         if old_string not in content:

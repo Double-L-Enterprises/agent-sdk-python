@@ -21,8 +21,10 @@ from pathlib import Path
 from typing import Any
 
 from ._internal.transport.litellm_http import LiteLLMHTTPTransport
+from .cost_tracker import CostTracker
 from .deep_agent_client import DeepAgentClient
 from .hooks import HookRegistry
+from .observability import global_history, global_metrics
 from .prompts import build_system_prompt
 from .tools import default_tools, dispatch_tool
 
@@ -124,6 +126,9 @@ class AutonomousRunner:
         hooks: HookRegistry | None = None,
         pipeline_mode: str = "auto",
         deep_agent_url: str | None = None,
+        cost_tracker: CostTracker | None = None,
+        agent_name: str = "autonomous",
+        team_id: str | None = None,
     ) -> None:
         """Initialize the runner.
 
@@ -142,6 +147,9 @@ class AutonomousRunner:
             pipeline_mode: "auto" (keyword-detect), "deterministic" (always Deep Agent),
                 or "autonomous" (always local AutonomousRunner).
             deep_agent_url: Base URL for Deep Agent API. Defaults to http://127.0.0.1:8040.
+            cost_tracker: Optional CostTracker for token/cost accounting.
+            agent_name: Name for this runner instance (used by cost_tracker and observability).
+            team_id: Optional team identifier for cost/metrics grouping.
         """
         self._task = task
         self._default_tools = tools
@@ -158,6 +166,9 @@ class AutonomousRunner:
         self._hooks = hooks or HookRegistry()
         self.pipeline_mode = pipeline_mode
         self._deep_agent_url = deep_agent_url or "http://127.0.0.1:8040"
+        self._cost_tracker = cost_tracker
+        self._agent_name = agent_name
+        self._team_id = team_id
 
     def switch_model(self, new_model: str) -> None:
         """Switch the model mid-task. Conversation history is preserved.
@@ -348,6 +359,14 @@ class AutonomousRunner:
             consecutive_stalls = 0
             session_id = str(uuid.uuid4())
             checkpoint_path: str | None = None
+            total_input_tokens = 0
+            total_output_tokens = 0
+
+            # ── Observability: record run start ───────────────────────
+            global_history.save_run  # validate import; actual save at end
+            global_metrics.set_agent_state(
+                agent_name=self._agent_name, state="running"
+            )
 
             while turn_count < self._max_turns:
                 turn_count += 1
@@ -382,16 +401,70 @@ class AutonomousRunner:
                 if content:
                     final_text = content
 
+                # ── Extract token usage from API response ─────────────
+                usage_raw = turn_result.get("raw", {}).get("usage", {})
+                turn_input_tokens = usage_raw.get("prompt_tokens", 0)
+                turn_output_tokens = usage_raw.get("completion_tokens", 0)
+                total_input_tokens += turn_input_tokens
+                total_output_tokens += turn_output_tokens
+                _turn_latency = time.monotonic() - start_time  # cumulative; per-turn would need a local timer
+
+                # ── CostTracker: record turn ──────────────────────────
+                if self._cost_tracker:
+                    budget_event = self._cost_tracker.record_turn(
+                        agent_name=self._agent_name,
+                        model=self._model,
+                        turn_number=turn_count,
+                        input_tokens=turn_input_tokens,
+                        output_tokens=turn_output_tokens,
+                        team_id=self._team_id,
+                    )
+                    if budget_event:
+                        logger.warning(
+                            "Budget exceeded: %s limit=$%.4f actual=$%.4f",
+                            budget_event.limit_type,
+                            budget_event.limit_usd,
+                            budget_event.actual_usd,
+                        )
+                        if budget_event.suggested_model:
+                            logger.info(
+                                "Auto-switching to budget-safe model: %s",
+                                budget_event.suggested_model,
+                            )
+                            self.switch_model(budget_event.suggested_model)
+                            transport.set_model(budget_event.suggested_model)
+                        else:
+                            # No fallback model — halt the run
+                            final_text = (
+                                f"[BUDGET] {budget_event.limit_type} budget exceeded: "
+                                f"${budget_event.actual_usd:.4f} > ${budget_event.limit_usd:.4f}"
+                            )
+                            stopped_reason = "budget_exceeded"
+                            error_message = final_text
+                            break
+
+                # ── Observability: record turn metrics ────────────────
+                global_metrics.record_turn(
+                    agent_name=self._agent_name,
+                    model=self._model,
+                    team_id=self._team_id or "solo",
+                    cost_delta=self._cost_tracker._agent_cost.get(self._agent_name, 0.0)
+                    if self._cost_tracker
+                    else 0.0,
+                )
+
                 # Track assistant response in local history
                 local_messages.append(
                     {"role": "assistant", "content": content, "tool_calls": tool_calls}
                 )
 
                 logger.debug(
-                    "Turn %d: text=%d chars, tool_calls=%d",
+                    "Turn %d: text=%d chars, tool_calls=%d, tokens=%d+%d",
                     turn_count,
                     len(content),
                     len(tool_calls),
+                    turn_input_tokens,
+                    turn_output_tokens,
                 )
 
                 # ── Hook: post_turn ────────────────────────────────────
@@ -459,6 +532,12 @@ class AutonomousRunner:
                             params=params,
                             result=tool_result,
                             is_error=is_error,
+                        )
+
+                        # ── Observability: record tool call ───────────
+                        global_metrics.record_tool_call(
+                            agent_name=self._agent_name,
+                            tool_name=tool_name,
                         )
 
                         transport.add_tool_result(
@@ -624,6 +703,44 @@ class AutonomousRunner:
             elapsed,
             checkpoint_path,
         )
+
+        # ── Observability: record run end ─────────────────────────────
+        global_metrics.set_agent_state(
+            agent_name=self._agent_name, state="done"
+        )
+        try:
+            global_history.save_run(
+                team_id=self._team_id or "solo",
+                agents=[
+                    {
+                        "name": self._agent_name,
+                        "model": self._model,
+                        "status": stopped_reason,
+                        "turns": turn_count,
+                        "cost": self._cost_tracker.cost_by_agent().get(
+                            self._agent_name, {}
+                        ).get("cost_usd", 0.0)
+                        if self._cost_tracker
+                        else 0.0,
+                    }
+                ],
+                messages=local_messages,
+                costs={
+                    self._agent_name: self._cost_tracker.cost_by_agent().get(
+                        self._agent_name, {}
+                    ).get("cost_usd", 0.0)
+                    if self._cost_tracker
+                    else 0.0
+                },
+                duration=elapsed,
+                result=stopped_reason,
+            )
+        except Exception as exc:
+            logger.warning("Failed to save run history: %s", exc)
+
+        # ── CostTracker: log summary ─────────────────────────────────
+        if self._cost_tracker:
+            self._cost_tracker.log_summary()
 
         # ── Hook: on_complete ──────────────────────────────────────────
         result = RunResult(

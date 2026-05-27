@@ -13,7 +13,8 @@ Hooks allow intercepting and modifying runner behavior at key points:
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Awaitable
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -54,9 +55,11 @@ class HookRegistry:
         async def my_hook(tool_name, params, **kwargs):
             return params
         """
+
         def decorator(fn: HookCallback) -> HookCallback:
             self.register(event, fn)
             return fn
+
         return decorator
 
     async def fire(self, event: str, **kwargs: Any) -> Any:
@@ -92,7 +95,9 @@ class HookRegistry:
             except Exception:
                 logger.warning(
                     "Hook %s raised on event %s — continuing",
-                    cb.__name__, event, exc_info=True,
+                    cb.__name__,
+                    event,
+                    exc_info=True,
                 )
 
         return result

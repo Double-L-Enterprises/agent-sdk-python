@@ -1,14 +1,17 @@
 from __future__ import annotations
+
 import asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Any
+
 
 @dataclass
 class ProviderLimits:
     max_rpm: int = 60
     max_tpm: int = 100_000
     max_concurrent: int = 5
+
 
 DEFAULT_LIMITS: dict[str, ProviderLimits] = {
     "nvidia": ProviderLimits(max_rpm=60, max_tpm=100_000, max_concurrent=5),
@@ -18,6 +21,7 @@ DEFAULT_LIMITS: dict[str, ProviderLimits] = {
     "deepseek-ai": ProviderLimits(max_rpm=60, max_tpm=100_000, max_concurrent=5),
 }
 
+
 @dataclass
 class _ProviderState:
     requests_this_minute: int = 0
@@ -26,6 +30,7 @@ class _ProviderState:
     queue_depth: int = 0
     minute_start: float = field(default_factory=time.monotonic)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
 
 class ProviderRateLimiter:
     def __init__(self, overrides: dict[str, ProviderLimits] | None = None):
@@ -98,7 +103,13 @@ class ProviderRateLimiter:
             }
         return result
 
+
 #: Global rate limiter singleton — import and use directly across all runners.
 global_rate_limiter = ProviderRateLimiter()
 
-__all__ = ["ProviderRateLimiter", "ProviderLimits", "DEFAULT_LIMITS", "global_rate_limiter"]
+__all__ = [
+    "ProviderRateLimiter",
+    "ProviderLimits",
+    "DEFAULT_LIMITS",
+    "global_rate_limiter",
+]

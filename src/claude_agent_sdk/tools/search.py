@@ -119,7 +119,9 @@ async def execute_search(params: dict[str, Any]) -> str:
             return f"No matches found for pattern: {pattern!r}"
 
         if len(output.encode("utf-8")) > _MAX_OUTPUT_BYTES:
-            output = output.encode("utf-8")[:_MAX_OUTPUT_BYTES].decode("utf-8", errors="ignore")
+            output = output.encode("utf-8")[:_MAX_OUTPUT_BYTES].decode(
+                "utf-8", errors="ignore"
+            )
             output += "\n[...output truncated]"
 
         return output

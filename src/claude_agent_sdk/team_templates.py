@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 
 # ── Agent definition within a template ─────────────────────────────────────
 
+
 @dataclass
 class TemplateAgent:
     """A single agent slot in a team template."""
@@ -30,6 +31,7 @@ class TemplateAgent:
 
 
 # ── Team template dataclass ──────────────────────────────────────────────────
+
 
 @dataclass
 class TeamTemplate:
@@ -260,18 +262,25 @@ def list_templates() -> list[dict[str, Any]]:
     """
     result = []
     for tmpl in _TEMPLATE_REGISTRY.values():
-        result.append({
-            "name": tmpl.name,
-            "description": tmpl.description,
-            "agent_count": len(tmpl.agents),
-            "agents": [
-                {"name": a.name, "model": a.model, "role": a.role, "persona": a.persona}
-                for a in tmpl.agents
-            ],
-            "task_flow": tmpl.task_flow,
-            "communication_pattern": tmpl.communication_pattern,
-            "metadata": tmpl.metadata,
-        })
+        result.append(
+            {
+                "name": tmpl.name,
+                "description": tmpl.description,
+                "agent_count": len(tmpl.agents),
+                "agents": [
+                    {
+                        "name": a.name,
+                        "model": a.model,
+                        "role": a.role,
+                        "persona": a.persona,
+                    }
+                    for a in tmpl.agents
+                ],
+                "task_flow": tmpl.task_flow,
+                "communication_pattern": tmpl.communication_pattern,
+                "metadata": tmpl.metadata,
+            }
+        )
     return result
 
 
@@ -283,7 +292,7 @@ def create_team_from_template(
     api_key: str = "sk-bbc8dc18c88aed96187cb3dea585b900e79601fd9f0fcf6cc93170b0e89fcca1",
     team_id: str | None = None,
     persona_overrides: dict[str, str] | None = None,
-) -> "TeamManager":  # type: ignore[return]  # forward ref resolved at call time
+) -> TeamManager:  # type: ignore[return]  # forward ref resolved at call time
     """Create a fully configured TeamManager from a named template.
 
     Imports agent_personas to enrich each agent's system prompt with
@@ -319,15 +328,12 @@ def create_team_from_template(
     """
     import asyncio
 
+    from .agent_personas import apply_persona_to_system_prompt, get_persona
     from .team_manager import TeamManager
-    from .agent_personas import get_persona, apply_persona_to_system_prompt
 
     if template_name not in _TEMPLATE_REGISTRY:
         available = list(_TEMPLATE_REGISTRY.keys())
-        raise KeyError(
-            f"Template '{template_name}' not found. "
-            f"Available: {available}"
-        )
+        raise KeyError(f"Template '{template_name}' not found. Available: {available}")
 
     tmpl = _TEMPLATE_REGISTRY[template_name]
     effective_team_id = team_id or f"{tmpl.name}-{int(__import__('time').time())}"
@@ -340,12 +346,18 @@ def create_team_from_template(
     )
 
     # Determine which agent gets the initial task (first in task_flow)
-    first_agent = tmpl.task_flow[0] if tmpl.task_flow else (tmpl.agents[0].name if tmpl.agents else None)
+    first_agent = (
+        tmpl.task_flow[0]
+        if tmpl.task_flow
+        else (tmpl.agents[0].name if tmpl.agents else None)
+    )
 
     async def _register_agents() -> None:
         for agent_def in tmpl.agents:
             # Resolve persona name (allow per-agent override)
-            persona_name = (persona_overrides or {}).get(agent_def.name, agent_def.persona)
+            persona_name = (persona_overrides or {}).get(
+                agent_def.name, agent_def.persona
+            )
             persona = get_persona(persona_name)
 
             # Build enriched system prompt
@@ -362,9 +374,11 @@ def create_team_from_template(
             await tm.add_agent(
                 name=agent_def.name,
                 model=agent_def.model,
-                role=agent_def.role + (
+                role=agent_def.role
+                + (
                     f" | Focus areas: {', '.join(persona.review_focus)}"
-                    if persona and persona.review_focus else ""
+                    if persona and persona.review_focus
+                    else ""
                 ),
                 task=agent_task,
             )
