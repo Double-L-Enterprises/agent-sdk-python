@@ -9,6 +9,7 @@ from .bash import BASH_TOOL_DEF, execute_bash
 from .file_ops import FILE_OPS_TOOL_DEFS, execute_file_op
 from .search import SEARCH_TOOL_DEF, execute_search
 from .spawn_agent import SPAWN_AGENT_TOOL_DEF, execute_spawn_agent
+from .mcp_bridge import MCPBridge
 
 logger = logging.getLogger(__name__)
 
@@ -74,4 +75,5 @@ __all__ = [
     "FILE_OPS_TOOL_DEFS",
     "SEARCH_TOOL_DEF",
     "SPAWN_AGENT_TOOL_DEF",
+    "MCPBridge",
 ]

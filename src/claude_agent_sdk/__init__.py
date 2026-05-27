@@ -53,6 +53,7 @@ from ._internal.sessions import (
 )
 from ._internal.transport import Transport
 from ._internal.transport.litellm_http import LiteLLMHTTPTransport
+from .streaming import StreamingTransportMixin
 from ._version import __version__
 from .client import ClaudeSDKClient
 from .litellm_config import LiteLLMConfig
@@ -61,6 +62,7 @@ from .runner import AutonomousRunner, RunResult
 from .hooks import HookRegistry
 from .multi_agent import AgentConfig, MultiAgentOrchestrator, MultiAgentResult
 from .tools import default_tools, dispatch_tool
+from .session_stores import FileSessionStore, RedisSessionStore, PostgresSessionStore
 from .types import (
     AgentDefinition,
     AssistantMessage,
@@ -534,6 +536,7 @@ __all__ = [
     "Transport",
     "ClaudeSDKClient",
     "LiteLLMHTTPTransport",
+    "StreamingTransportMixin",
     # Autonomous runner
     "AutonomousRunner",
     "RunResult",
@@ -642,6 +645,9 @@ __all__ = [
     "SessionSummaryEntry",
     "SessionListSubkeysKey",
     "InMemorySessionStore",
+    "FileSessionStore",
+    "RedisSessionStore",
+    "PostgresSessionStore",
     "fold_session_summary",
     "MirrorErrorMessage",
     "project_key_for_directory",
@@ -669,6 +675,8 @@ __all__ = [
     "SandboxSettings",
     "SandboxNetworkConfig",
     "SandboxIgnoreViolations",
+    # Permission support
+    "PermissionPolicy",
     # MCP Server Support
     "create_sdk_mcp_server",
     "tool",
