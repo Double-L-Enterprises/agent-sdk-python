@@ -65,6 +65,36 @@ from .multi_agent import AgentConfig, MultiAgentOrchestrator, MultiAgentResult
 from .tools import default_tools, dispatch_tool, team_tools
 from .team_manager import TeamManager, AgentState
 from .message_bus import MessageBus, Message as TeamMessage
+from .team_templates import (
+    TeamTemplate,
+    TemplateAgent,
+    FULL_STACK_TEAM,
+    CODE_REVIEW_PAIR,
+    DEVIL_ADVOCATE_DUO,
+    SECURITY_AUDIT_TEAM,
+    RAPID_PROTOTYPE,
+    list_templates,
+    create_team_from_template,
+)
+from .agent_personas import (
+    Persona,
+    SECURITY_EXPERT,
+    PERFORMANCE_ENGINEER,
+    UX_SPECIALIST,
+    ARCHITECT,
+    DEVIL_ADVOCATE,
+    TEST_ENGINEER,
+    get_persona,
+    list_personas,
+    apply_persona_to_system_prompt,
+    register_persona,
+)
+from .consensus import (
+    VoteMode,
+    AgentVote,
+    VoteRecord,
+    ConsensusManager,
+)
 from .session_stores import FileSessionStore, RedisSessionStore, PostgresSessionStore
 from .observability import (
     TeamMetrics,
@@ -585,6 +615,33 @@ __all__ = [
     "AgentState",
     "MessageBus",
     "TeamMessage",
+    # Team templates
+    "TeamTemplate",
+    "TemplateAgent",
+    "FULL_STACK_TEAM",
+    "CODE_REVIEW_PAIR",
+    "DEVIL_ADVOCATE_DUO",
+    "SECURITY_AUDIT_TEAM",
+    "RAPID_PROTOTYPE",
+    "list_templates",
+    "create_team_from_template",
+    # Agent personas
+    "Persona",
+    "SECURITY_EXPERT",
+    "PERFORMANCE_ENGINEER",
+    "UX_SPECIALIST",
+    "ARCHITECT",
+    "DEVIL_ADVOCATE",
+    "TEST_ENGINEER",
+    "get_persona",
+    "list_personas",
+    "apply_persona_to_system_prompt",
+    "register_persona",
+    # Consensus voting
+    "VoteMode",
+    "AgentVote",
+    "VoteRecord",
+    "ConsensusManager",
     # Observability
     "TeamMetrics",
     "RunHistory",
