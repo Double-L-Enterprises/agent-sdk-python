@@ -62,8 +62,33 @@ from .runner import AutonomousRunner, RunResult
 from .hooks import HookRegistry
 from .prompts import build_system_prompt, AUTONOMOUS_AGENT_SYSTEM_PROMPT
 from .multi_agent import AgentConfig, MultiAgentOrchestrator, MultiAgentResult
-from .tools import default_tools, dispatch_tool
+from .tools import default_tools, dispatch_tool, team_tools
+from .team_manager import TeamManager, AgentState
+from .message_bus import MessageBus, Message as TeamMessage
 from .session_stores import FileSessionStore, RedisSessionStore, PostgresSessionStore
+from .observability import (
+    TeamMetrics,
+    RunHistory,
+    RunRecord,
+    AGENT_STATE_IDLE,
+    AGENT_STATE_RUNNING,
+    AGENT_STATE_STALLED,
+    AGENT_STATE_DONE,
+    global_metrics,
+    global_history,
+)
+from .webhooks import (
+    WebhookManager,
+    WebhookTarget,
+    WebhookEvent,
+    WebhookFormat,
+    SMTPConfig,
+)
+from .rate_limiter import (
+    ProviderRateLimiter,
+    ProviderLimits,
+    global_rate_limiter,
+)
 from .types import (
     AgentDefinition,
     AssistantMessage,
@@ -553,7 +578,33 @@ __all__ = [
     "LiteLLMConfig",
     # Tools
     "default_tools",
+    "team_tools",
     "dispatch_tool",
+    # Team / multi-agent
+    "TeamManager",
+    "AgentState",
+    "MessageBus",
+    "TeamMessage",
+    # Observability
+    "TeamMetrics",
+    "RunHistory",
+    "RunRecord",
+    "AGENT_STATE_IDLE",
+    "AGENT_STATE_RUNNING",
+    "AGENT_STATE_STALLED",
+    "AGENT_STATE_DONE",
+    "global_metrics",
+    "global_history",
+    # Webhooks
+    "WebhookManager",
+    "WebhookTarget",
+    "WebhookEvent",
+    "WebhookFormat",
+    "SMTPConfig",
+    # Rate limiting
+    "ProviderRateLimiter",
+    "ProviderLimits",
+    "global_rate_limiter",
     # Types
     "PermissionMode",
     "EffortLevel",
