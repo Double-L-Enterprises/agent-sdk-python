@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import ast
 import fnmatch
 import logging
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -176,13 +178,78 @@ async def _write(params: dict[str, Any]) -> str:
         return "[ERROR] Write requires 'file_path' parameter"
 
     path = Path(file_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # For new files, write directly without backup
+    if not path.exists():
+        try:
+            path.write_text(content, encoding="utf-8")
+        except OSError as exc:
+            return f"[ERROR] Could not write {file_path}: {exc}"
+        return f"Successfully wrote {len(content)} characters to {file_path}"
+    
+    # For existing files, use A/B safe-write
+    backup_path = path.with_suffix(path.suffix + ".bak")
+    new_path = path.with_suffix(path.suffix + ".new")
+    
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
+        # Create backup of original file
+        shutil.copy2(path, backup_path)
+        
+        # Write new content to .new file
+        new_path.write_text(content, encoding="utf-8")
+        
+        # Verify the .new file
+        if not new_path.exists():
+            raise OSError("New file was not created")
+            
+        if new_path.stat().st_size == 0:
+            raise OSError("New file is empty")
+            
+        # For .py files, verify syntax with ast.parse
+        if path.suffix == ".py":
+            try:
+                new_content = new_path.read_text(encoding="utf-8")
+                ast.parse(new_content)
+            except SyntaxError as se:
+                raise OSError(f"Python syntax error: {se}")
+            except Exception as e:
+                raise OSError(f"Could not verify Python syntax: {e}")
+        
+        # Verification passed, atomically replace original with new file
+        # On most filesystems, os.replace is atomic
+        import os
+        os.replace(new_path, path)
+        
+        # Clean up backup after successful swap
+        if backup_path.exists():
+            backup_path.unlink()
+            
+        return f"Successfully wrote {len(content)} characters to {file_path} (safe-write)"
+        
     except OSError as exc:
-        return f"[ERROR] Could not write {file_path}: {exc}"
-
-    return f"Successfully wrote {len(content)} characters to {file_path}"
+        # Verification failed or operation failed
+        # Clean up .new file if it exists
+        if new_path.exists():
+            try:
+                new_path.unlink()
+            except OSError:
+                pass  # Ignore cleanup errors
+                
+        # Keep backup file for recovery
+        error_msg = f"[ERROR] Safe-write failed for {file_path}: {exc}"
+        return error_msg
+        
+    except Exception as exc:
+        # Handle any other unexpected errors
+        if new_path.exists():
+            try:
+                new_path.unlink()
+            except OSError:
+                pass
+                
+        error_msg = f"[ERROR] Unexpected error during safe-write for {file_path}: {exc}"
+        return error_msg
 
 
 async def _edit(params: dict[str, Any]) -> str:

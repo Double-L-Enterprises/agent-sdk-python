@@ -883,3 +883,4 @@ For full migration instructions, see our [migration guide](https://docs.claude.c
 - Fix multi-line buffering issue
 - Rename cost_usd to total_cost_usd in API responses
 - Fix optional cost fields handling
+- 2026-05-27 08:33 — Modified test_syntax.py
