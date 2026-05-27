@@ -60,6 +60,7 @@ from .litellm_config import LiteLLMConfig
 from .query import query
 from .runner import AutonomousRunner, RunResult
 from .hooks import HookRegistry
+from .prompts import build_system_prompt, AUTONOMOUS_AGENT_SYSTEM_PROMPT
 from .multi_agent import AgentConfig, MultiAgentOrchestrator, MultiAgentResult
 from .tools import default_tools, dispatch_tool
 from .session_stores import FileSessionStore, RedisSessionStore, PostgresSessionStore
@@ -541,6 +542,9 @@ __all__ = [
     "AutonomousRunner",
     "RunResult",
     "HookRegistry",
+    # Prompts
+    "build_system_prompt",
+    "AUTONOMOUS_AGENT_SYSTEM_PROMPT",
     # Multi-agent orchestration
     "MultiAgentOrchestrator",
     "AgentConfig",

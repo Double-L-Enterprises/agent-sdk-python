@@ -21,6 +21,7 @@ from typing import Any
 
 from ._internal.transport.litellm_http import LiteLLMHTTPTransport
 from .hooks import HookRegistry
+from .prompts import build_system_prompt
 from .tools import default_tools, dispatch_tool
 
 logger = logging.getLogger(__name__)
@@ -189,14 +190,7 @@ class AutonomousRunner:
         start_time = time.monotonic()
 
         # Build goal-anchored system prompt
-        system_prompt = self._custom_system_prompt or (
-            "You are an autonomous AI agent. Your goal is to accomplish the following task:\n\n"
-            f"{actual_task}\n\n"
-            "Use the provided tools to accomplish this. Work autonomously until the task is complete. "
-            "DO NOT ask the user for clarification — make reasonable decisions and proceed. "
-            "After each action, analyze the result and determine the next step. "
-            "When done, say 'Task complete.' and summarize what you did."
-        )
+        system_prompt = self._custom_system_prompt or build_system_prompt(actual_task)
 
         transport = LiteLLMHTTPTransport(
             base_url=self._base_url,
