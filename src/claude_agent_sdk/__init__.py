@@ -52,9 +52,15 @@ from ._internal.sessions import (
     list_subagents_from_store,
 )
 from ._internal.transport import Transport
+from ._internal.transport.litellm_http import LiteLLMHTTPTransport
 from ._version import __version__
 from .client import ClaudeSDKClient
+from .litellm_config import LiteLLMConfig
 from .query import query
+from .runner import AutonomousRunner, RunResult
+from .hooks import HookRegistry
+from .multi_agent import AgentConfig, MultiAgentOrchestrator, MultiAgentResult
+from .tools import default_tools, dispatch_tool
 from .types import (
     AgentDefinition,
     AssistantMessage,
@@ -527,6 +533,20 @@ __all__ = [
     # Transport
     "Transport",
     "ClaudeSDKClient",
+    "LiteLLMHTTPTransport",
+    # Autonomous runner
+    "AutonomousRunner",
+    "RunResult",
+    "HookRegistry",
+    # Multi-agent orchestration
+    "MultiAgentOrchestrator",
+    "AgentConfig",
+    "MultiAgentResult",
+    # LiteLLM config
+    "LiteLLMConfig",
+    # Tools
+    "default_tools",
+    "dispatch_tool",
     # Types
     "PermissionMode",
     "EffortLevel",

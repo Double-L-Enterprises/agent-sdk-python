@@ -180,9 +180,25 @@ class ClaudeSDKClient:
         if self._materialized is not None:
             options = apply_materialized_options(options, self._materialized)
 
-        # Use provided custom transport or create subprocess transport
+        # Use provided custom transport or create subprocess/litellm transport
         if self._custom_transport:
             self._transport = self._custom_transport
+        elif options.transport_type == "litellm":
+            from ._internal.transport.litellm_http import LiteLLMHTTPTransport
+            from .litellm_config import LiteLLMConfig
+
+            config = LiteLLMConfig.from_env()
+            if options.litellm_config:
+                # Override with explicit options
+                for k, v in options.litellm_config.items():
+                    if hasattr(config, k):
+                        setattr(config, k, v)
+            self._transport = LiteLLMHTTPTransport(
+                base_url=config.base_url,
+                api_key=config.api_key,
+                model=config.model,
+                timeout=config.timeout,
+            )
         else:
             self._transport = SubprocessCLITransport(
                 prompt=actual_prompt,

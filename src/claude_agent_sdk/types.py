@@ -1929,6 +1929,21 @@ class ClaudeAgentOptions:
     immediate timeout; use a large value to effectively disable.
     """
 
+    transport_type: str | None = None
+    """Transport type to use for the agent session.
+
+    - ``None`` (default) — Use SubprocessCLITransport (CLI-based).
+    - ``"litellm"`` — Use LiteLLMHTTPTransport (direct API calls).
+    """
+
+    litellm_config: dict[str, Any] | None = None
+    """LiteLLM-specific configuration options.
+
+    Only used when ``transport_type`` is ``"litellm"``.
+    Supports: ``base_url``, ``api_key``, ``model``, ``max_turns``,
+    ``checkpoint_dir``, ``escalation_model``, ``timeout``.
+    """
+
     task_budget: TaskBudget | None = None
     """API-side task budget in tokens.
 
