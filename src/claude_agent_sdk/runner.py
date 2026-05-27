@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from ._internal.transport.litellm_http import LiteLLMHTTPTransport
+from .deep_agent_client import DeepAgentClient
 from .hooks import HookRegistry
 from .prompts import build_system_prompt
 from .tools import default_tools, dispatch_tool
@@ -120,6 +122,8 @@ class AutonomousRunner:
         checkpoint_dir: str | None = None,
         escalation_model: str | None = None,
         hooks: HookRegistry | None = None,
+        pipeline_mode: str = "auto",
+        deep_agent_url: str | None = None,
     ) -> None:
         """Initialize the runner.
 
@@ -135,6 +139,9 @@ class AutonomousRunner:
             checkpoint_dir: If set, checkpoints are saved after each tool turn.
             escalation_model: If set, auto-switch to this model at stall tier 3.
             hooks: HookRegistry for lifecycle events.
+            pipeline_mode: "auto" (keyword-detect), "deterministic" (always Deep Agent),
+                or "autonomous" (always local AutonomousRunner).
+            deep_agent_url: Base URL for Deep Agent API. Defaults to http://127.0.0.1:8040.
         """
         self._task = task
         self._default_tools = tools
@@ -149,6 +156,8 @@ class AutonomousRunner:
         self._current_turn = 0
         self._model_history: list[dict[str, Any]] = []
         self._hooks = hooks or HookRegistry()
+        self.pipeline_mode = pipeline_mode
+        self._deep_agent_url = deep_agent_url or "http://127.0.0.1:8040"
 
     def switch_model(self, new_model: str) -> None:
         """Switch the model mid-task. Conversation history is preserved.
@@ -158,12 +167,103 @@ class AutonomousRunner:
         """
         old_model = self._model
         self._model = new_model
-        self._model_history.append({
-            "from": old_model,
-            "to": new_model,
-            "at_turn": self._current_turn,
-        })
-        logger.info("Model switched: %s → %s at turn %d", old_model, new_model, self._current_turn)
+        self._model_history.append(
+            {
+                "from": old_model,
+                "to": new_model,
+                "at_turn": self._current_turn,
+            }
+        )
+        logger.info(
+            "Model switched: %s → %s at turn %d",
+            old_model,
+            new_model,
+            self._current_turn,
+        )
+
+    def _should_use_deep_agent(self, task: str) -> bool:
+        """Determine whether to route this task to Deep Agent.
+
+        - "deterministic" → always True
+        - "autonomous"    → always False
+        - "auto"          → keyword-based detection via DeepAgentClient.should_use_pipeline
+        """
+        if self.pipeline_mode == "deterministic":
+            return True
+        if self.pipeline_mode == "autonomous":
+            return False
+        # "auto" — keyword detection
+        return DeepAgentClient.should_use_pipeline(task)
+
+    async def _delegate_to_deep_agent(
+        self, task: str, project_id: str, output_dir: str
+    ) -> "RunResult":
+        """Delegate this task to Deep Agent's pipeline API.
+
+        Falls back to local execution if Deep Agent is unreachable.
+        """
+        start_time = time.monotonic()
+        client = DeepAgentClient(base_url=self._deep_agent_url)
+
+        try:
+            if not await client.health():
+                logger.warning(
+                    "[WARN] Deep Agent unreachable at %s — falling back to AutonomousRunner",
+                    self._deep_agent_url,
+                )
+                return RunResult(
+                    messages=[],
+                    final_text=(
+                        f"[WARN] Deep Agent unreachable at {self._deep_agent_url}. "
+                        "Falling back to local AutonomousRunner."
+                    ),
+                    turn_count=0,
+                    total_tool_calls=0,
+                    success=False,
+                    stopped_reason="deep_agent_unreachable",
+                    elapsed_seconds=time.monotonic() - start_time,
+                    model_history=self._model_history,
+                    error_message=f"Deep Agent unreachable at {self._deep_agent_url}",
+                )
+
+            run_id = await client.start_pipeline(
+                task=task,
+                project_id=project_id,
+                output_dir=output_dir,
+                model=self._model,
+            )
+            logger.info("Delegated to Deep Agent: run_id=%s", run_id)
+
+            final_status = await client.wait_for_completion(run_id)
+
+            elapsed = time.monotonic() - start_time
+            success = final_status.status == "completed"
+            stopped_reason = f"deep_agent_{final_status.status}"
+            summary = final_status.result_summary or f"Deep Agent pipeline {final_status.status}."
+            if final_status.output_files:
+                summary += f" Output files: {', '.join(final_status.output_files)}"
+
+            logger.info(
+                "Deep Agent pipeline finished: status=%s run_id=%s elapsed=%.1fs",
+                final_status.status,
+                run_id,
+                elapsed,
+            )
+
+            return RunResult(
+                messages=[{"role": "assistant", "content": summary}],
+                final_text=summary,
+                turn_count=0,
+                total_tool_calls=0,
+                success=success,
+                stopped_reason=stopped_reason,
+                elapsed_seconds=elapsed,
+                model_history=self._model_history,
+                error_message=final_status.error or "",
+            )
+
+        finally:
+            await client.close()
 
     async def run(
         self,
@@ -185,6 +285,20 @@ class AutonomousRunner:
         actual_task = task or self._task
         if not actual_task:
             raise ValueError("task must be provided either to __init__ or to run()")
+
+        # ── Pipeline routing: delegate to Deep Agent if appropriate ────────
+        if self._should_use_deep_agent(actual_task):
+            try:
+                return await self._delegate_to_deep_agent(
+                    actual_task,
+                    project_id="default",
+                    output_dir=cwd or os.getcwd(),
+                )
+            except Exception as e:
+                logger.warning(
+                    "Deep Agent delegation failed, falling back to local: %s", e
+                )
+                # Fall through to local execution
 
         actual_tools = tools or self._default_tools or default_tools()
         start_time = time.monotonic()
@@ -225,7 +339,9 @@ class AutonomousRunner:
         total_tool_calls = 0
         final_text = ""
         stopped_reason = "max_turns"
-        local_messages: list[dict[str, Any]] = [{"role": "user", "content": actual_task}]
+        local_messages: list[dict[str, Any]] = [
+            {"role": "user", "content": actual_task}
+        ]
         error_message = ""
 
         try:
@@ -238,7 +354,9 @@ class AutonomousRunner:
                 self._current_turn = turn_count
                 logger.info(
                     "Turn %d/%d (consecutive_stalls=%d)",
-                    turn_count, self._max_turns, consecutive_stalls,
+                    turn_count,
+                    self._max_turns,
+                    consecutive_stalls,
                 )
 
                 # ── Hook: pre_turn ─────────────────────────────────────
@@ -271,7 +389,9 @@ class AutonomousRunner:
 
                 logger.debug(
                     "Turn %d: text=%d chars, tool_calls=%d",
-                    turn_count, len(content), len(tool_calls),
+                    turn_count,
+                    len(content),
+                    len(tool_calls),
                 )
 
                 # ── Hook: post_turn ────────────────────────────────────
@@ -291,7 +411,9 @@ class AutonomousRunner:
                         fn = tc.get("function", {})
                         tool_name = fn.get("name", "unknown")
                         try:
-                            params: dict[str, Any] = json.loads(fn.get("arguments", "{}"))
+                            params: dict[str, Any] = json.loads(
+                                fn.get("arguments", "{}")
+                            )
                         except json.JSONDecodeError:
                             params = {}
 
@@ -312,7 +434,9 @@ class AutonomousRunner:
                         else:
                             # Hook may have modified params
                             tool_result = await dispatch_tool(
-                                tool_name, hook_result or params, cwd=cwd,
+                                tool_name,
+                                hook_result or params,
+                                cwd=cwd,
                                 parent_base_url=self._base_url,
                                 parent_api_key=self._api_key,
                                 parent_model=self._model,
@@ -322,7 +446,10 @@ class AutonomousRunner:
                             is_error = tool_result.startswith("[ERROR]")
 
                         logger.debug(
-                            "    %s: %d chars, error=%s", tool_name, len(tool_result), is_error
+                            "    %s: %d chars, error=%s",
+                            tool_name,
+                            len(tool_result),
+                            is_error,
                         )
 
                         # ── Hook: post_tool_use ────────────────────────
@@ -334,14 +461,25 @@ class AutonomousRunner:
                             is_error=is_error,
                         )
 
-                        transport.add_tool_result(tc["id"], tool_result, is_error=is_error)
+                        transport.add_tool_result(
+                            tc["id"], tool_result, is_error=is_error
+                        )
                         local_messages.append(
-                            {"role": "tool", "tool_call_id": tc["id"], "content": tool_result}
+                            {
+                                "role": "tool",
+                                "tool_call_id": tc["id"],
+                                "content": tool_result,
+                            }
                         )
 
                     # Save checkpoint after tool execution
                     checkpoint_path = await self._save_checkpoint(
-                        transport, turn_count, actual_task, cwd, total_tool_calls, session_id
+                        transport,
+                        turn_count,
+                        actual_task,
+                        cwd,
+                        total_tool_calls,
+                        session_id,
                     )
                     continue  # Back to top — model sees results next turn
 
@@ -349,7 +487,8 @@ class AutonomousRunner:
                 if self._is_complete(content):
                     logger.info(
                         "Task complete (explicit marker) after %d turns, %d tool calls",
-                        turn_count, total_tool_calls,
+                        turn_count,
+                        total_tool_calls,
                     )
                     stopped_reason = "completed"
                     break
@@ -392,7 +531,11 @@ class AutonomousRunner:
                 # Tier 3: Repair prompt with examples, optionally escalate model
                 elif consecutive_stalls == 3:
                     if self._escalation_model and self._model != self._escalation_model:
-                        logger.info("Auto-escalating from %s to %s due to stall", self._model, self._escalation_model)
+                        logger.info(
+                            "Auto-escalating from %s to %s due to stall",
+                            self._model,
+                            self._escalation_model,
+                        )
                         self.switch_model(self._escalation_model)
                         transport.set_model(self._escalation_model)
                         cont_msg = (
@@ -400,8 +543,12 @@ class AutonomousRunner:
                             f"Continue working on the task. The original goal was: {actual_task}\n"
                             "Use tools to make progress."
                         )
-                        consecutive_stalls = 0  # reset stalls — give new model a fresh chance
-                        logger.info("Stall tier 3: auto-escalation + fresh continuation")
+                        consecutive_stalls = (
+                            0  # reset stalls — give new model a fresh chance
+                        )
+                        logger.info(
+                            "Stall tier 3: auto-escalation + fresh continuation"
+                        )
                     else:
                         cont_msg = (
                             "You MUST use a tool on this turn. You have not used tools for 3 consecutive turns. "
@@ -419,12 +566,13 @@ class AutonomousRunner:
                     logger.warning(
                         "Agent stalled after %d turns (%d tool calls made before stall). "
                         "The model responded 4+ times without making tool calls. Stopping.",
-                        turn_count, total_tool_calls,
+                        turn_count,
+                        total_tool_calls,
                     )
                     final_text = (
-                        f"[STALL] Agent reached maximum diagnostic attempts (4 turns without tool use). "
-                        f"The model may not support function calling well on this task. "
-                        f"Checkpoint saved for resumption with a different model."
+                        "[STALL] Agent reached maximum diagnostic attempts (4 turns without tool use). "
+                        "The model may not support function calling well on this task. "
+                        "Checkpoint saved for resumption with a different model."
                     )
                     stopped_reason = "stall_diagnosed"
                     error_message = f"Model stalled: {consecutive_stalls} consecutive turns without tool calls"
@@ -438,7 +586,12 @@ class AutonomousRunner:
 
                     # Save final checkpoint before bailing
                     checkpoint_path = await self._save_checkpoint(
-                        transport, turn_count, actual_task, cwd, total_tool_calls, session_id
+                        transport,
+                        turn_count,
+                        actual_task,
+                        cwd,
+                        total_tool_calls,
+                        session_id,
                     )
                     break
                 else:
@@ -451,7 +604,9 @@ class AutonomousRunner:
 
             else:
                 # for-loop exhausted without break
-                logger.warning("Reached max_turns=%d without completion", self._max_turns)
+                logger.warning(
+                    "Reached max_turns=%d without completion", self._max_turns
+                )
                 stopped_reason = "max_turns"
 
         finally:
@@ -463,7 +618,11 @@ class AutonomousRunner:
         elapsed = time.monotonic() - start_time
         logger.info(
             "Run done: stopped_reason=%s, turns=%d, tool_calls=%d, elapsed=%.1fs, checkpoint=%s",
-            stopped_reason, turn_count, total_tool_calls, elapsed, checkpoint_path,
+            stopped_reason,
+            turn_count,
+            total_tool_calls,
+            elapsed,
+            checkpoint_path,
         )
 
         # ── Hook: on_complete ──────────────────────────────────────────
@@ -581,7 +740,9 @@ class AutonomousRunner:
         task = checkpoint.get("task", "")
         cwd = checkpoint.get("cwd")
         model = kwargs.get("model", checkpoint.get("model", "qwen/qwen3-max"))
-        base_url = kwargs.get("base_url", checkpoint.get("base_url", "http://100.102.119.55:3002"))
+        base_url = kwargs.get(
+            "base_url", checkpoint.get("base_url", "http://100.102.119.55:3002")
+        )
         max_turns = kwargs.get("max_turns", checkpoint.get("turn_count", 50) + 50)
         api_key = kwargs.get("api_key", "sk-litellm")
         timeout = kwargs.get("timeout", 120.0)

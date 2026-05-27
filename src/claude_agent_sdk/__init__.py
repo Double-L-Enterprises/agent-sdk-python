@@ -53,72 +53,69 @@ from ._internal.sessions import (
 )
 from ._internal.transport import Transport
 from ._internal.transport.litellm_http import LiteLLMHTTPTransport
-from .streaming import StreamingTransportMixin
 from ._version import __version__
-from .client import ClaudeSDKClient
-from .litellm_config import LiteLLMConfig
-from .query import query
-from .runner import AutonomousRunner, RunResult
-from .hooks import HookRegistry
-from .prompts import build_system_prompt, AUTONOMOUS_AGENT_SYSTEM_PROMPT
-from .multi_agent import AgentConfig, MultiAgentOrchestrator, MultiAgentResult
-from .tools import default_tools, dispatch_tool, team_tools
-from .team_manager import TeamManager, AgentState
-from .message_bus import MessageBus, Message as TeamMessage
-from .team_templates import (
-    TeamTemplate,
-    TemplateAgent,
-    FULL_STACK_TEAM,
-    CODE_REVIEW_PAIR,
-    DEVIL_ADVOCATE_DUO,
-    SECURITY_AUDIT_TEAM,
-    RAPID_PROTOTYPE,
-    list_templates,
-    create_team_from_template,
-)
+from .agent_memory import AgentMemory
 from .agent_personas import (
-    Persona,
-    SECURITY_EXPERT,
-    PERFORMANCE_ENGINEER,
-    UX_SPECIALIST,
     ARCHITECT,
     DEVIL_ADVOCATE,
+    PERFORMANCE_ENGINEER,
+    SECURITY_EXPERT,
     TEST_ENGINEER,
+    UX_SPECIALIST,
+    Persona,
+    apply_persona_to_system_prompt,
     get_persona,
     list_personas,
-    apply_persona_to_system_prompt,
     register_persona,
 )
+from .client import ClaudeSDKClient
 from .consensus import (
-    VoteMode,
     AgentVote,
-    VoteRecord,
     ConsensusManager,
+    VoteMode,
+    VoteRecord,
 )
-from .session_stores import FileSessionStore, RedisSessionStore, PostgresSessionStore
+from .cost_tracker import BudgetExceededEvent, BudgetPolicy, CostTracker
+from .hooks import HookRegistry
+from .litellm_config import LiteLLMConfig
+from .message_bus import Message as TeamMessage
+from .message_bus import MessageBus
+from .multi_agent import AgentConfig, MultiAgentOrchestrator, MultiAgentResult
 from .observability import (
-    TeamMetrics,
-    RunHistory,
-    RunRecord,
+    AGENT_STATE_DONE,
     AGENT_STATE_IDLE,
     AGENT_STATE_RUNNING,
     AGENT_STATE_STALLED,
-    AGENT_STATE_DONE,
-    global_metrics,
+    RunHistory,
+    RunRecord,
+    TeamMetrics,
     global_history,
+    global_metrics,
 )
-from .webhooks import (
-    WebhookManager,
-    WebhookTarget,
-    WebhookEvent,
-    WebhookFormat,
-    SMTPConfig,
-)
+from .prompts import AUTONOMOUS_AGENT_SYSTEM_PROMPT, build_system_prompt
+from .query import query
 from .rate_limiter import (
-    ProviderRateLimiter,
     ProviderLimits,
+    ProviderRateLimiter,
     global_rate_limiter,
 )
+from .runner import AutonomousRunner, RunResult
+from .deep_agent_client import DeepAgentClient, PipelineStatus
+from .session_stores import FileSessionStore, PostgresSessionStore, RedisSessionStore
+from .streaming import StreamingTransportMixin
+from .team_manager import AgentState, TeamManager
+from .team_templates import (
+    CODE_REVIEW_PAIR,
+    DEVIL_ADVOCATE_DUO,
+    FULL_STACK_TEAM,
+    RAPID_PROTOTYPE,
+    SECURITY_AUDIT_TEAM,
+    TeamTemplate,
+    TemplateAgent,
+    create_team_from_template,
+    list_templates,
+)
+from .tools import default_tools, dispatch_tool, team_tools
 from .types import (
     AgentDefinition,
     AssistantMessage,
@@ -207,6 +204,13 @@ from .types import (
     ToolUseBlock,
     UserMessage,
     UserPromptSubmitHookInput,
+)
+from .webhooks import (
+    SMTPConfig,
+    WebhookEvent,
+    WebhookFormat,
+    WebhookManager,
+    WebhookTarget,
 )
 
 # MCP Server Support
@@ -597,6 +601,9 @@ __all__ = [
     "AutonomousRunner",
     "RunResult",
     "HookRegistry",
+    # Deep Agent pipeline client
+    "DeepAgentClient",
+    "PipelineStatus",
     # Prompts
     "build_system_prompt",
     "AUTONOMOUS_AGENT_SYSTEM_PROMPT",
@@ -662,6 +669,12 @@ __all__ = [
     "ProviderRateLimiter",
     "ProviderLimits",
     "global_rate_limiter",
+    # Cost tracking
+    "CostTracker",
+    "BudgetPolicy",
+    "BudgetExceededEvent",
+    # Agent memory
+    "AgentMemory",
     # Types
     "PermissionMode",
     "EffortLevel",
